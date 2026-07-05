@@ -350,25 +350,82 @@ function stopCurrentVideo() {
 function playVideo(videoEl) {
   stopCurrentVideo();
   currentVideo = videoEl;
+  const slide = videoEl.parentElement;
+
+  // 隐藏播放图标
+  slide.classList.add('playing');
+  const icon = slide.querySelector('.carousel__video-icon');
+  if (icon) icon.style.display = 'none';
+
   videoEl.currentTime = 0;
-  videoEl.play().catch(() => {}); // 静音自动播放允许
-  videoEl.parentElement.classList.add('playing');
 
-  // 视频进度条更新
-  if (videoProgressTimer) clearInterval(videoProgressTimer);
-  videoProgressTimer = setInterval(() => {
-    if (videoEl.duration) {
-      const pct = (videoEl.currentTime / videoEl.duration) * 100;
-      progressBar.style.transition = 'none';
-      progressBar.style.width = pct + '%';
-    }
-  }, 100);
+  // 清旧 ended 事件
+  videoEl.onended = null;
 
-  // 视频结束 → 切下一个
-  videoEl.onended = () => {
-    stopCurrentVideo();
-    next();
+  const tryPlay = () => {
+    videoEl.play().then(() => {
+      // 播放成功
+      slide.classList.add('playing');
+      if (icon) icon.style.display = 'none';
+
+      // 视频进度条更新
+      if (videoProgressTimer) clearInterval(videoProgressTimer);
+      videoProgressTimer = setInterval(() => {
+        if (videoEl.duration && videoEl.duration > 0) {
+          const pct = (videoEl.currentTime / videoEl.duration) * 100;
+          progressBar.style.transition = 'none';
+          progressBar.style.width = pct + '%';
+        }
+      }, 100);
+
+      // 视频结束 → 切下一个
+      videoEl.onended = () => {
+        stopCurrentVideo();
+        next();
+      };
+    }).catch(() => {
+      // 浏览器阻止自动播放 → 显示播放按钮，等用户点击
+      slide.classList.remove('playing');
+      if (icon) {
+        icon.style.display = '';
+        icon.style.pointerEvents = 'auto';
+        icon.style.cursor = 'pointer';
+        icon.title = '点击开始播放';
+        // 用户点一次后，浏览器就会允许后续自动播放
+        const clickToStart = () => {
+          icon.style.pointerEvents = 'none';
+          icon.style.cursor = '';
+          icon.style.display = 'none';
+          icon.removeEventListener('click', clickToStart);
+          // 先让浏览器记录用户手势，然后用一个微小的延迟确保 play 成功
+          videoEl.play().then(() => {
+            slide.classList.add('playing');
+            if (videoProgressTimer) clearInterval(videoProgressTimer);
+            videoProgressTimer = setInterval(() => {
+              if (videoEl.duration && videoEl.duration > 0) {
+                const pct = (videoEl.currentTime / videoEl.duration) * 100;
+                progressBar.style.transition = 'none';
+                progressBar.style.width = pct + '%';
+              }
+            }, 100);
+            videoEl.onended = () => {
+              stopCurrentVideo();
+              next();
+            };
+          }).catch(() => {}); // 这次应该成功，因为有用户手势
+        };
+        icon.addEventListener('click', clickToStart);
+      }
+    });
   };
+
+  // 等待视频数据就绪再播放
+  if (videoEl.readyState >= 2) {
+    tryPlay();
+  } else {
+    videoEl.addEventListener('canplay', tryPlay, { once: true });
+    videoEl.load(); // 强制加载
+  }
 }
 
 // ---- 启动图片定时器 ----
@@ -409,19 +466,26 @@ function buildCarousel(imgList) {
       const videoEl = document.createElement('video');
       videoEl.src = item.url;
       videoEl.muted = true;
+      videoEl.autoplay = true;
       videoEl.playsInline = true;
-      videoEl.preload = 'metadata';
+      videoEl.preload = 'auto';
+      videoEl.loop = false;
       videoEl.setAttribute('playsinline', '');
       videoEl.setAttribute('webkit-playsinline', '');
+      videoEl.setAttribute('autoplay', '');
+      videoEl.setAttribute('x5-video-player-type', 'h5');
+      videoEl.setAttribute('x5-video-player-fullscreen', 'true');
+      videoEl.setAttribute('x5-video-orientation', 'landscape');
       videoEl.style.width = '100%';
       videoEl.style.height = '100%';
       videoEl.style.objectFit = 'cover';
       slide.appendChild(videoEl);
 
-      // 视频播放图标（播放时自动隐藏）
+      // 视频播放图标（播放时自动隐藏，失败时显示可点击）
       const icon = document.createElement('div');
       icon.className = 'carousel__video-icon';
       icon.textContent = '▶';
+      icon.style.pointerEvents = 'none';
       slide.appendChild(icon);
     } else {
       // 图片
@@ -552,6 +616,17 @@ fullscreenBtn.addEventListener('click', () => {
   }
 });
 
+// 全屏状态变化后重新启动当前 slide 的播放/定时器
+document.addEventListener('fullscreenchange', () => {
+  setTimeout(() => {
+    if (images.length > 0) {
+      stopAutoPlay();
+      stopCurrentVideo();
+      afterSlideChange(images[currentIndex]);
+    }
+  }, 150);
+});
+
 // ---- 事件 ----
 prevBtn.addEventListener('click', prev);
 nextBtn.addEventListener('click', next);
@@ -657,6 +732,23 @@ async function poll() {
 // ============================================================
 //  启动
 // ============================================================
+let firstInteractionHandled = false;
+
+// 页面首次用户交互后，确保轮播正常启动
+function onFirstInteraction() {
+  if (firstInteractionHandled) return;
+  firstInteractionHandled = true;
+  if (images.length > 0) {
+    stopAutoPlay();
+    stopCurrentVideo();
+    afterSlideChange(images[currentIndex]);
+  }
+}
+
+['click', 'touchstart', 'keydown'].forEach(evt => {
+  document.addEventListener(evt, onFirstInteraction, { once: true });
+});
+
 async function init() {
   const list = await loadImages();
   lastHash = hashImages(list);
