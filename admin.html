@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>图片管理 - 后台</title>
+<title>媒体管理 - 后台</title>
 <style>
   /* ===== 全局 ===== */
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -217,7 +217,8 @@
     transform: scale(1.03);
     border-color: rgba(255,255,255,0.2);
   }
-  .grid__item img {
+  .grid__item img,
+  .grid__item video {
     width: 100%;
     height: 100%;
     object-fit: cover;
@@ -267,6 +268,17 @@
     background: rgba(0,0,0,0.5);
     color: rgba(255,255,255,0.6);
     pointer-events: none;
+  }
+
+  /* 视频播放图标覆盖 */
+  .grid__item__video-icon {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 30px;
+    opacity: 0.6;
+    pointer-events: none;
+    text-shadow: 0 2px 6px rgba(0,0,0,0.6);
   }
 
   /* ===== 底部操作栏 ===== */
@@ -349,6 +361,7 @@
     .grid { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; }
     .grid__item { aspect-ratio: 1 / 1; }
     .grid__item__delete { opacity: 1; width: 20px; height: 20px; font-size: 12px; }
+    .grid__item__video-icon { font-size: 22px; }
     .btn { padding: 8px 16px; font-size: 13px; }
     .toast { font-size: 12px; padding: 8px 16px; }
   }
@@ -357,19 +370,19 @@
 <body>
 
 <!-- 全局拖拽覆盖层 -->
-<div class="global-drop-overlay" id="globalDropOverlay">📷 释放以添加图片</div>
+<div class="global-drop-overlay" id="globalDropOverlay">📷 释放以添加</div>
 
 <!-- Toast 容器 -->
 <div class="toast-container" id="toastContainer"></div>
 
 <!-- 隐藏文件选择框 -->
-<input type="file" id="fileInput" accept="image/*" multiple hidden>
+<input type="file" id="fileInput" accept="image/*,video/*" multiple hidden>
 
 <div class="page">
   <!-- 头部 -->
   <div class="header">
     <a class="header__back" href="index.html">← 查看展示页</a>
-    <div class="header__title">📷 图片管理</div>
+    <div class="header__title">📷 图片 / 视频管理</div>
     <span class="header__count" id="headerCount">0 / 20</span>
   </div>
 
@@ -377,8 +390,8 @@
   <div class="card">
     <div class="upload-zone" id="uploadZone">
       <div class="upload-zone__icon">📁</div>
-      <div class="upload-zone__text">点击或拖拽上传本地图片</div>
-      <div class="upload-zone__hint">支持 JPG / PNG / GIF / WebP / BMP，最多 20 张</div>
+      <div class="upload-zone__text">点击或拖拽上传图片 / 视频</div>
+      <div class="upload-zone__hint">图片：JPG/PNG/GIF/WebP/BMP &nbsp;|&nbsp; 视频：MP4/WebM/MOV/AVI，最多 20 个</div>
     </div>
   </div>
 
@@ -388,17 +401,17 @@
   <!-- 网址加载卡片 -->
   <div class="card">
     <div class="url-section">
-      <div class="url-section__label">🌐 粘贴图片链接（每行一个）</div>
+      <div class="url-section__label">🌐 粘贴图片或视频链接（每行一个）</div>
       <textarea class="url-section__textarea" id="urlTextarea"
-        placeholder="https://example.com/photo1.jpg&#10;https://example.com/photo2.png&#10;https://example.com/photo3.webp"></textarea>
-      <button class="url-section__btn" id="urlLoadBtn">加载图片</button>
+        placeholder="https://example.com/photo.jpg&#10;https://example.com/video.mp4&#10;https://example.com/photo2.png"></textarea>
+      <button class="url-section__btn" id="urlLoadBtn">加载</button>
     </div>
   </div>
 
-  <!-- 已有图片列表 -->
+  <!-- 已有媒体列表 -->
   <div class="card">
-    <div class="grid-title" id="gridTitle">已添加图片（0 张）</div>
-    <div class="grid-empty" id="gridEmpty">还没有图片，上传或粘贴链接开始吧</div>
+    <div class="grid-title" id="gridTitle">已添加（0 个）</div>
+    <div class="grid-empty" id="gridEmpty">还没有内容，上传图片/视频或粘贴链接开始吧</div>
     <div class="grid" id="grid"></div>
   </div>
 
@@ -416,7 +429,7 @@
 const DB_NAME = 'ImageCarousel';
 const DB_STORE = 'images';
 const DB_VERSION = 1;
-const MAX_IMAGES = 20;
+const MAX_ITEMS = 20;
 
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -442,7 +455,7 @@ async function loadAll() {
   });
 }
 
-async function addImages(entries) {
+async function addItems(entries) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(DB_STORE, 'readwrite');
@@ -456,11 +469,11 @@ async function addImages(entries) {
   });
 }
 
-async function deleteImage(id) {
+async function deleteItem(id) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(DB_STORE, 'readwrite');
-    store = tx.objectStore(DB_STORE);
+    const store = tx.objectStore(DB_STORE);
     store.delete(id);
     tx.oncomplete = () => { db.close(); resolve(); };
     tx.onerror = () => { db.close(); reject(tx.error); };
@@ -506,25 +519,42 @@ function showToast(msg, warn = false) {
 }
 
 // ============================================================
+//  判断是否为视频 URL/文件
+// ============================================================
+const VIDEO_EXTENSIONS = /\.(mp4|webm|mov|mkv|avi|flv|wmv|m4v|ogv|3gp)(\?.*)?$/i;
+
+function isVideoUrl(url) {
+  return VIDEO_EXTENSIONS.test(url);
+}
+
+function isVideoFile(file) {
+  return file.type.startsWith('video/');
+}
+
+function isImageFile(file) {
+  return file.type.startsWith('image/');
+}
+
+// ============================================================
 //  处理本地上传
 // ============================================================
 function handleLocalFiles(files) {
-  const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
-  if (imageFiles.length === 0) {
-    showToast('未检测到图片文件', true);
+  const validFiles = Array.from(files).filter(f => isImageFile(f) || isVideoFile(f));
+  if (validFiles.length === 0) {
+    showToast('未检测到图片或视频文件', true);
     return;
   }
 
   loadAll().then(existing => {
-    const remaining = MAX_IMAGES - existing.length;
+    const remaining = MAX_ITEMS - existing.length;
     if (remaining <= 0) {
-      showToast(`已达 ${MAX_IMAGES} 张上限，请先删除部分图片`, true);
+      showToast(`已达 ${MAX_ITEMS} 个上限，请先删除部分内容`, true);
       return;
     }
 
-    const toAdd = imageFiles.slice(0, remaining);
-    if (imageFiles.length > remaining) {
-      showToast(`仅添加前 ${remaining} 张（已达上限）`, true);
+    const toAdd = validFiles.slice(0, remaining);
+    if (validFiles.length > remaining) {
+      showToast(`仅添加前 ${remaining} 个（已达上限）`, true);
     }
 
     let loaded = 0;
@@ -535,14 +565,21 @@ function handleLocalFiles(files) {
         entries.push({
           url: reader.result,
           name: file.name,
+          mediaType: isVideoFile(file) ? 'video' : 'image',
           type: 'local',
           createdAt: Date.now()
         });
         loaded++;
         if (loaded === toAdd.length) {
-          addImages(entries).then(() => {
+          addItems(entries).then(() => {
             refreshGrid();
-            showToast(`已添加 ${entries.length} 张图片`);
+            const imgCount = entries.filter(e => e.mediaType === 'image').length;
+            const vidCount = entries.filter(e => e.mediaType === 'video').length;
+            let msg = `已添加 ${entries.length} 个`;
+            if (imgCount && vidCount) msg += `（${imgCount} 图 + ${vidCount} 视频）`;
+            else if (vidCount) msg += `视频`;
+            else msg += `图片`;
+            showToast(msg);
           });
         }
       };
@@ -556,7 +593,7 @@ function handleLocalFiles(files) {
 // ============================================================
 async function handleUrls() {
   const raw = urlTextarea.value.trim();
-  if (!raw) { showToast('请粘贴图片链接', true); return; }
+  if (!raw) { showToast('请粘贴链接', true); return; }
 
   const lines = raw.split('\n')
     .map(l => l.trim())
@@ -564,14 +601,14 @@ async function handleUrls() {
     .filter(l => /^https?:\/\/.+/.test(l));
 
   if (lines.length === 0) {
-    showToast('未检测到有效的 http/https 图片链接', true);
+    showToast('未检测到有效的 http/https 链接', true);
     return;
   }
 
   const existing = await loadAll();
-  const remaining = MAX_IMAGES - existing.length;
+  const remaining = MAX_ITEMS - existing.length;
   if (remaining <= 0) {
-    showToast(`已达 ${MAX_IMAGES} 张上限，请先删除部分图片`, true);
+    showToast(`已达 ${MAX_ITEMS} 个上限，请先删除部分内容`, true);
     return;
   }
 
@@ -581,57 +618,94 @@ async function handleUrls() {
   }
 
   const entries = urls.map(u => {
-    // 从 URL 提取文件名
     let name = '';
     try {
       const path = new URL(u).pathname;
       name = path.split('/').pop() || u;
     } catch { name = u; }
-    return { url: u, name, type: 'remote', createdAt: Date.now() };
+    return {
+      url: u,
+      name,
+      mediaType: isVideoUrl(u) ? 'video' : 'image',
+      type: 'remote',
+      createdAt: Date.now()
+    };
   });
 
-  await addImages(entries);
+  await addItems(entries);
   urlTextarea.value = '';
   refreshGrid();
-  showToast(`已添加 ${entries.length} 张远程图片`);
+
+  const imgCount = entries.filter(e => e.mediaType === 'image').length;
+  const vidCount = entries.filter(e => e.mediaType === 'video').length;
+  let msg = `已添加 ${entries.length} 个`;
+  if (imgCount && vidCount) msg += `（${imgCount} 图 + ${vidCount} 视频）`;
+  else if (vidCount) msg += `视频`;
+  else msg += `图片`;
+  showToast(msg);
 }
 
 // ============================================================
 //  刷新缩略图网格
 // ============================================================
 async function refreshGrid() {
-  const images = await loadAll();
+  const items = await loadAll();
   grid.innerHTML = '';
-  gridTitle.textContent = `已添加图片（${images.length} 张）`;
-  headerCount.textContent = `${images.length} / ${MAX_IMAGES}`;
+  gridTitle.textContent = `已添加（${items.length} 个）`;
+  headerCount.textContent = `${items.length} / ${MAX_ITEMS}`;
 
-  if (images.length === 0) {
+  if (items.length === 0) {
     gridEmpty.style.display = '';
     return;
   }
   gridEmpty.style.display = 'none';
 
-  images.forEach(img => {
-    const item = document.createElement('div');
-    item.className = 'grid__item';
+  items.forEach(item => {
+    const isVideo = item.mediaType === 'video';
+    const itemDiv = document.createElement('div');
+    itemDiv.className = 'grid__item';
 
-    const imgEl = document.createElement('img');
-    imgEl.src = img.url;
-    imgEl.alt = img.name;
-    imgEl.loading = 'lazy';
-    item.appendChild(imgEl);
+    if (isVideo) {
+      // 视频缩略图：用 video 标签（preload=metadata 显示首帧）
+      const videoEl = document.createElement('video');
+      videoEl.src = item.url;
+      videoEl.muted = true;
+      videoEl.playsInline = true;
+      videoEl.preload = 'metadata';
+      videoEl.setAttribute('playsinline', '');
+      videoEl.style.width = '100%';
+      videoEl.style.height = '100%';
+      videoEl.style.objectFit = 'cover';
+      // 跳转到首帧
+      videoEl.addEventListener('loadeddata', () => {
+        videoEl.currentTime = 0.5;
+      }, { once: true });
+      itemDiv.appendChild(videoEl);
+
+      // 播放图标
+      const playIcon = document.createElement('div');
+      playIcon.className = 'grid__item__video-icon';
+      playIcon.textContent = '▶';
+      itemDiv.appendChild(playIcon);
+    } else {
+      const imgEl = document.createElement('img');
+      imgEl.src = item.url;
+      imgEl.alt = item.name;
+      imgEl.loading = 'lazy';
+      itemDiv.appendChild(imgEl);
+    }
 
     // 类型标签
     const badge = document.createElement('div');
     badge.className = 'grid__item__badge';
-    badge.textContent = img.type === 'local' ? '本地' : '远程';
-    item.appendChild(badge);
+    badge.textContent = isVideo ? '🎬 视频' : (item.type === 'local' ? '📷 本地' : '🌐 远程');
+    itemDiv.appendChild(badge);
 
     // 文件名
     const nameEl = document.createElement('div');
     nameEl.className = 'grid__item__name';
-    nameEl.textContent = img.name || '未知';
-    item.appendChild(nameEl);
+    nameEl.textContent = (isVideo ? '🎬 ' : '') + (item.name || '未知');
+    itemDiv.appendChild(nameEl);
 
     // 删除按钮
     const delBtn = document.createElement('button');
@@ -640,19 +714,19 @@ async function refreshGrid() {
     delBtn.title = '删除';
     delBtn.addEventListener('click', e => {
       e.stopPropagation();
-      deleteImage(img.id).then(() => {
+      deleteItem(item.id).then(() => {
         refreshGrid();
         showToast('已删除');
       });
     });
-    item.appendChild(delBtn);
+    itemDiv.appendChild(delBtn);
 
-    // 点击预览（新标签打开原图）
-    item.addEventListener('click', () => {
-      window.open(img.url, '_blank');
+    // 点击预览
+    itemDiv.addEventListener('click', () => {
+      window.open(item.url, '_blank');
     });
 
-    grid.appendChild(item);
+    grid.appendChild(itemDiv);
   });
 }
 
@@ -714,10 +788,10 @@ urlLoadBtn.addEventListener('click', handleUrls);
 
 // 清空全部
 clearAllBtn.addEventListener('click', () => {
-  if (!confirm('确定要清空全部图片吗？展示页的轮播也将变空。')) return;
+  if (!confirm('确定要清空全部内容吗？展示页也将变空。')) return;
   clearAll().then(() => {
     refreshGrid();
-    showToast('已清空全部图片');
+    showToast('已清空全部');
   });
 });
 

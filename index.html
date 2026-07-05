@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>图片轮播展示</title>
+<title>图片视频轮播展示</title>
 <style>
   /* ===== 全局 ===== */
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -42,10 +42,7 @@
     border: 1px solid rgba(126,184,255,0.3);
     transition: all 0.25s;
   }
-  .empty-state__link:hover {
-    background: rgba(126,184,255,0.1);
-    border-color: rgba(126,184,255,0.6);
-  }
+  .empty-state__link:hover { background: rgba(126,184,255,0.1); border-color: rgba(126,184,255,0.6); }
 
   /* ===== 轮播容器 ===== */
   .carousel-container {
@@ -78,16 +75,35 @@
     flex: 0 0 100%;
     height: 100%;
     position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #0a0a16;
   }
 
-  .carousel__slide img {
+  .carousel__slide img,
+  .carousel__slide video {
     width: 100%;
     height: 100%;
     object-fit: cover;
     display: block;
   }
 
-  /* 图片名称标签 */
+  /* 视频播放图标 */
+  .carousel__video-icon {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 48px;
+    opacity: 0.35;
+    pointer-events: none;
+    z-index: 2;
+    transition: opacity 0.3s;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.5);
+  }
+  .carousel__slide.playing .carousel__video-icon { opacity: 0; }
+
+  /* 名称标签 */
   .carousel__label {
     position: absolute;
     bottom: 40px;
@@ -103,6 +119,21 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     pointer-events: none;
+    z-index: 3;
+  }
+
+  .carousel__media-type {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 8px;
+    background: rgba(0,0,0,0.4);
+    backdrop-filter: blur(4px);
+    color: rgba(255,255,255,0.6);
+    pointer-events: none;
+    z-index: 3;
   }
 
   /* ===== 箭头 ===== */
@@ -165,6 +196,7 @@
     background: rgba(255,255,255,0.5);
     z-index: 10;
     transition: width 0.1s linear;
+    width: 0%;
   }
 
   /* ===== 底部管理链接 ===== */
@@ -218,18 +250,11 @@
     .carousel__dot { width: 8px; height: 8px; }
     .carousel__dot.active { width: 22px; }
 
-    .carousel__label {
-      bottom: 32px;
-      left: 8px;
-      font-size: 10px;
-    }
+    .carousel__label { bottom: 32px; left: 8px; font-size: 10px; }
+    .carousel__media-type { top: 10px; left: 10px; font-size: 10px; }
+    .carousel__video-icon { font-size: 36px; }
 
-    .fullscreen-btn {
-      top: 10px;
-      right: 10px;
-      width: 30px; height: 30px;
-      font-size: 14px;
-    }
+    .fullscreen-btn { top: 10px; right: 10px; width: 30px; height: 30px; font-size: 14px; }
   }
 </style>
 </head>
@@ -238,8 +263,8 @@
 <!-- 空状态 -->
 <div class="empty-state" id="emptyState">
   <div class="empty-state__icon">🖼️</div>
-  <div class="empty-state__text">暂无图片</div>
-  <a class="empty-state__link" href="admin.html">📷 前往管理页上传图片</a>
+  <div class="empty-state__text">暂无图片或视频</div>
+  <a class="empty-state__link" href="admin.html">📷 前往管理页上传</a>
 </div>
 
 <!-- 轮播容器 -->
@@ -252,7 +277,7 @@
     <div class="carousel__progress" id="progressBar"></div>
     <button class="fullscreen-btn" id="fullscreenBtn" title="全屏">⛶</button>
   </div>
-  <a class="admin-link" href="admin.html">📷 管理图片</a>
+  <a class="admin-link" href="admin.html">📷 管理图片/视频</a>
 </div>
 
 <script>
@@ -282,10 +307,7 @@ async function loadImages() {
     const tx = db.transaction(DB_STORE, 'readonly');
     const store = tx.objectStore(DB_STORE);
     const req = store.getAll();
-    req.onsuccess = () => {
-      db.close();
-      resolve(req.result || []);
-    };
+    req.onsuccess = () => { db.close(); resolve(req.result || []); };
     req.onerror = () => { db.close(); reject(req.error); };
   });
 }
@@ -293,28 +315,76 @@ async function loadImages() {
 // ============================================================
 //  轮播逻辑
 // ============================================================
-const AUTO_INTERVAL = 3000;
+const AUTO_INTERVAL = 3000; // 图片展示秒数
 let images = [];
 let currentIndex = 0;
 let autoTimer = null;
+let videoProgressTimer = null;
 let isTransitioning = false;
+let currentVideo = null; // 当前播放的视频元素引用
 
 // DOM
-const emptyState      = document.getElementById('emptyState');
+const emptyState       = document.getElementById('emptyState');
 const carouselContainer = document.getElementById('carouselContainer');
-const carousel        = document.getElementById('carousel');
-const track           = document.getElementById('carouselTrack');
-const prevBtn         = document.getElementById('prevBtn');
-const nextBtn         = document.getElementById('nextBtn');
-const dotsContainer   = document.getElementById('carouselDots');
-const progressBar     = document.getElementById('progressBar');
-const fullscreenBtn   = document.getElementById('fullscreenBtn');
+const carousel         = document.getElementById('carousel');
+const track            = document.getElementById('carouselTrack');
+const prevBtn          = document.getElementById('prevBtn');
+const nextBtn          = document.getElementById('nextBtn');
+const dotsContainer    = document.getElementById('carouselDots');
+const progressBar      = document.getElementById('progressBar');
+const fullscreenBtn    = document.getElementById('fullscreenBtn');
+
+// ---- 停止当前视频 ----
+function stopCurrentVideo() {
+  if (currentVideo) {
+    currentVideo.pause();
+    currentVideo.currentTime = 0;
+    currentVideo = null;
+    const slide = document.querySelector('.carousel__slide.playing');
+    if (slide) slide.classList.remove('playing');
+  }
+  if (videoProgressTimer) { clearInterval(videoProgressTimer); videoProgressTimer = null; }
+}
+
+// ---- 播放视频并监听结束 ----
+function playVideo(videoEl) {
+  stopCurrentVideo();
+  currentVideo = videoEl;
+  videoEl.currentTime = 0;
+  videoEl.play().catch(() => {}); // 静音自动播放允许
+  videoEl.parentElement.classList.add('playing');
+
+  // 视频进度条更新
+  if (videoProgressTimer) clearInterval(videoProgressTimer);
+  videoProgressTimer = setInterval(() => {
+    if (videoEl.duration) {
+      const pct = (videoEl.currentTime / videoEl.duration) * 100;
+      progressBar.style.transition = 'none';
+      progressBar.style.width = pct + '%';
+    }
+  }, 100);
+
+  // 视频结束 → 切下一个
+  videoEl.onended = () => {
+    stopCurrentVideo();
+    next();
+  };
+}
+
+// ---- 启动图片定时器 ----
+function startImageTimer() {
+  stopAutoPlay();
+  resetProgressBar();
+  autoTimer = setInterval(next, AUTO_INTERVAL);
+}
 
 // ---- 构建轮播 ----
 function buildCarousel(imgList) {
   stopAutoPlay();
+  stopCurrentVideo();
   track.innerHTML = '';
   dotsContainer.innerHTML = '';
+  progressBar.style.transition = 'none';
   progressBar.style.width = '0%';
   images = imgList;
   currentIndex = 0;
@@ -328,23 +398,53 @@ function buildCarousel(imgList) {
   emptyState.style.display = 'none';
   carouselContainer.classList.add('visible');
 
-  images.forEach((img, i) => {
+  images.forEach((item, i) => {
     const slide = document.createElement('div');
     slide.className = 'carousel__slide';
 
-    const imgEl = document.createElement('img');
-    imgEl.src = img.url;
-    imgEl.alt = img.name || '图片';
-    imgEl.loading = i === 0 ? 'eager' : 'lazy';
-    slide.appendChild(imgEl);
+    const isVideo = item.mediaType === 'video';
+
+    if (isVideo) {
+      // 视频
+      const videoEl = document.createElement('video');
+      videoEl.src = item.url;
+      videoEl.muted = true;
+      videoEl.playsInline = true;
+      videoEl.preload = 'metadata';
+      videoEl.setAttribute('playsinline', '');
+      videoEl.setAttribute('webkit-playsinline', '');
+      videoEl.style.width = '100%';
+      videoEl.style.height = '100%';
+      videoEl.style.objectFit = 'cover';
+      slide.appendChild(videoEl);
+
+      // 视频播放图标（播放时自动隐藏）
+      const icon = document.createElement('div');
+      icon.className = 'carousel__video-icon';
+      icon.textContent = '▶';
+      slide.appendChild(icon);
+    } else {
+      // 图片
+      const imgEl = document.createElement('img');
+      imgEl.src = item.url;
+      imgEl.alt = item.name || '图片';
+      imgEl.loading = i === 0 ? 'eager' : 'lazy';
+      slide.appendChild(imgEl);
+    }
 
     // 名称标签
-    if (img.name) {
+    if (item.name) {
       const label = document.createElement('div');
       label.className = 'carousel__label';
-      label.textContent = img.name;
+      label.textContent = (isVideo ? '🎬 ' : '') + item.name;
       slide.appendChild(label);
     }
+
+    // 媒体类型标签
+    const typeTag = document.createElement('div');
+    typeTag.className = 'carousel__media-type';
+    typeTag.textContent = isVideo ? '🎬 视频' : '📷 图片';
+    slide.appendChild(typeTag);
 
     track.appendChild(slide);
   });
@@ -353,14 +453,14 @@ function buildCarousel(imgList) {
   images.forEach((_, i) => {
     const dot = document.createElement('button');
     dot.className = 'carousel__dot';
-    dot.setAttribute('aria-label', `第 ${i + 1} 张`);
+    dot.setAttribute('aria-label', `第 ${i + 1} 个`);
     dot.addEventListener('click', () => goToSlide(i));
     dotsContainer.appendChild(dot);
   });
 
   track.style.transform = 'translateX(0)';
   updateDots();
-  startAutoPlay();
+  afterSlideChange();
 }
 
 // ---- 切换 ----
@@ -369,11 +469,40 @@ function goToSlide(index) {
   if (index < 0 || index >= images.length) return;
 
   isTransitioning = true;
+  stopAutoPlay();
+  stopCurrentVideo();
+
   currentIndex = index;
   track.style.transform = `translateX(-${currentIndex * 100}%)`;
   updateDots();
-  resetAutoPlay();
-  setTimeout(() => { isTransitioning = false; }, 500);
+
+  const item = images[currentIndex];
+  setTimeout(() => {
+    isTransitioning = false;
+    afterSlideChange(item);
+  }, 500);
+}
+
+// ---- 切换后处理：图片启动定时器，视频播放 ----
+function afterSlideChange(item) {
+  if (!item) item = images[currentIndex];
+  if (!item) return;
+
+  const slide = track.children[currentIndex];
+  if (!slide) return;
+
+  if (item.mediaType === 'video') {
+    // 视频：直接播放，不用定时器
+    const videoEl = slide.querySelector('video');
+    if (videoEl) {
+      playVideo(videoEl);
+    }
+    progressBar.style.transition = 'none';
+    progressBar.style.width = '0%';
+  } else {
+    // 图片：启动定时器 + 进度条
+    startImageTimer();
+  }
 }
 
 function prev() {
@@ -389,27 +518,29 @@ function updateDots() {
   document.querySelectorAll('.carousel__dot').forEach((d, i) => {
     d.classList.toggle('active', i === currentIndex);
   });
-  resetProgressBar();
+}
+
+// ---- 进度条（图片用） ----
+function resetProgressBar() {
+  progressBar.style.transition = 'none';
+  progressBar.style.width = '0%';
+  progressBar.offsetHeight; // 强制回流
+  progressBar.style.transition = `width ${AUTO_INTERVAL}ms linear`;
+  progressBar.style.width = '100%';
 }
 
 // ---- 自动播放 ----
 function startAutoPlay() {
   stopAutoPlay();
+  const item = images[currentIndex];
+  if (!item || item.mediaType === 'video') return; // 视频不由定时器控制
   if (images.length > 1) {
     autoTimer = setInterval(next, AUTO_INTERVAL);
   }
 }
+
 function stopAutoPlay() {
   if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
-}
-function resetAutoPlay() { stopAutoPlay(); startAutoPlay(); }
-
-function resetProgressBar() {
-  progressBar.style.transition = 'none';
-  progressBar.style.width = '0%';
-  progressBar.offsetHeight;
-  progressBar.style.transition = `width ${AUTO_INTERVAL}ms linear`;
-  progressBar.style.width = '100%';
 }
 
 // ---- 全屏 ----
@@ -431,42 +562,85 @@ document.addEventListener('keydown', e => {
   if (e.key === 'ArrowRight') { e.preventDefault(); next(); }
 });
 
+// ---- 悬停暂停 ----
 carousel.addEventListener('mouseenter', () => {
-  stopAutoPlay();
-  const w = getComputedStyle(progressBar).width;
-  progressBar.style.transition = 'none';
-  progressBar.style.width = w;
+  const item = images[currentIndex];
+  if (item && item.mediaType === 'video') {
+    // 暂停视频
+    if (currentVideo) {
+      currentVideo.pause();
+    }
+    if (videoProgressTimer) { clearInterval(videoProgressTimer); videoProgressTimer = null; }
+  } else {
+    stopAutoPlay();
+    const w = getComputedStyle(progressBar).width;
+    progressBar.style.transition = 'none';
+    progressBar.style.width = w;
+  }
 });
+
 carousel.addEventListener('mouseleave', () => {
-  if (images.length > 0) {
+  const item = images[currentIndex];
+  if (item && item.mediaType === 'video') {
+    // 恢复播放视频
+    if (currentVideo) {
+      currentVideo.play().catch(() => {});
+      // 恢复进度条更新
+      if (videoProgressTimer) clearInterval(videoProgressTimer);
+      videoProgressTimer = setInterval(() => {
+        if (currentVideo && currentVideo.duration) {
+          const pct = (currentVideo.currentTime / currentVideo.duration) * 100;
+          progressBar.style.transition = 'none';
+          progressBar.style.width = pct + '%';
+        }
+      }, 100);
+    }
+  } else {
     startAutoPlay();
     progressBar.style.transition = `width ${AUTO_INTERVAL}ms linear`;
     progressBar.style.width = '100%';
   }
 });
 
-// 触屏
+// ---- 触屏 ----
 let touchStartX = 0;
 carousel.addEventListener('touchstart', e => {
   if (images.length === 0) return;
   touchStartX = e.changedTouches[0].screenX;
-  stopAutoPlay();
+  // 暂停
+  const item = images[currentIndex];
+  if (item && item.mediaType === 'video') {
+    if (currentVideo) currentVideo.pause();
+  } else {
+    stopAutoPlay();
+  }
 }, { passive: true });
+
 carousel.addEventListener('touchend', e => {
   if (images.length === 0) return;
   const diff = touchStartX - e.changedTouches[0].screenX;
-  if (Math.abs(diff) > 50) { diff > 0 ? next() : prev(); }
-  startAutoPlay();
+  if (Math.abs(diff) > 50) {
+    diff > 0 ? next() : prev();
+  } else {
+    // 没有滑动，恢复
+    const item = images[currentIndex];
+    if (item && item.mediaType === 'video') {
+      if (currentVideo) currentVideo.play().catch(() => {});
+    } else {
+      startAutoPlay();
+    }
+  }
 });
+
 carousel.addEventListener('touchmove', e => { e.preventDefault(); }, { passive: false });
 
 // ============================================================
-//  轮询 IndexedDB 检测变化
+//  轮询 IndexedDB
 // ============================================================
 let lastHash = '';
 
 function hashImages(list) {
-  return list.map(i => i.id + '|' + i.url.substring(0, 80)).join(',');
+  return list.map(i => i.id + '|' + (i.url || '').substring(0, 80)).join(',');
 }
 
 async function poll() {
