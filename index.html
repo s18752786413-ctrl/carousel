@@ -216,19 +216,21 @@
     right: 16px;
     width: 36px; height: 36px;
     border-radius: 50%;
-    border: none;
-    background: rgba(0,0,0,0.45);
+    border: 1px solid rgba(255,255,255,0.3);
+    background: rgba(0,0,0,0.55);
     backdrop-filter: blur(6px);
     color: #fff;
-    font-size: 16px;
+    font-size: 13px;
+    font-weight: 700;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 10;
-    transition: background 0.2s;
+    transition: background 0.2s, border-color 0.2s;
+    letter-spacing: 1px;
   }
-  .carousel__sound-btn:hover { background: rgba(0,0,0,0.65); }
+  .carousel__sound-btn:hover { background: rgba(0,0,0,0.75); border-color: rgba(255,255,255,0.6); }
 
   .fullscreen-btn {
     position: absolute;
@@ -275,7 +277,7 @@
     .carousel__media-type { top: 10px; left: 10px; font-size: 10px; }
     .carousel__video-icon { font-size: 36px; }
 
-    .carousel__sound-btn { bottom: 32px; right: 10px; width: 30px; height: 30px; font-size: 14px; }
+    .carousel__sound-btn { bottom: 32px; right: 10px; width: 30px; height: 30px; font-size: 11px; }
     .fullscreen-btn { top: 10px; right: 10px; width: 30px; height: 30px; font-size: 14px; }
   }
 </style>
@@ -381,8 +383,8 @@ function playVideo(videoEl) {
   // 更新声音按钮图标
   const soundBtn = slide.querySelector('.carousel__sound-btn');
   if (soundBtn) {
-    soundBtn.textContent = soundEnabled ? '🔊' : '🔇';
-    soundBtn.title = soundEnabled ? '静音' : '开启声音';
+    soundBtn.textContent = soundEnabled ? 'ON' : 'OFF';
+    soundBtn.title = soundEnabled ? '点击静音' : '点击开启声音';
   }
 
   // 隐藏播放图标
@@ -518,15 +520,16 @@ function buildCarousel(imgList) {
       // 声音切换按钮
       const soundBtn = document.createElement('button');
       soundBtn.className = 'carousel__sound-btn';
-      soundBtn.textContent = '🔇';
-      soundBtn.title = '开启声音';
+      soundBtn.textContent = 'OFF';
+      soundBtn.title = '点击开启声音';
       soundBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         soundEnabled = !soundEnabled;
+        localStorage.setItem('carousel_sound_enabled', soundEnabled ? 'true' : 'false');
         // 更新所有视频 slide 的声音按钮图标
         document.querySelectorAll('.carousel__sound-btn').forEach(b => {
-          b.textContent = soundEnabled ? '🔊' : '🔇';
-          b.title = soundEnabled ? '静音' : '开启声音';
+          b.textContent = soundEnabled ? 'ON' : 'OFF';
+          b.title = soundEnabled ? '点击静音' : '点击开启声音';
         });
         // 更新当前播放视频的静音状态
         if (currentVideo) {
@@ -808,6 +811,8 @@ function onFirstInteraction() {
 });
 
 async function init() {
+  // 读取后台声音设置
+  soundEnabled = localStorage.getItem('carousel_sound_enabled') === 'true';
   const list = await loadImages();
   lastHash = hashImages(list);
   buildCarousel(list);
