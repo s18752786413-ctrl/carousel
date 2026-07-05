@@ -583,29 +583,59 @@ function buildCarousel(imgList) {
     dotsContainer.appendChild(dot);
   });
 
+  // 末尾克隆第一张，实现无缝循环
+  if (images.length > 1) {
+    const firstSlide = track.children[0];
+    const clone = firstSlide.cloneNode(true);
+    clone.classList.add('carousel__slide--clone');
+    track.appendChild(clone);
+  }
+
+  track.style.transition = 'none';
   track.style.transform = 'translateX(0)';
   updateDots();
+  // 强制回流后恢复过渡
+  track.offsetHeight;
+  track.style.transition = '';
   afterSlideChange();
 }
 
 // ---- 切换 ----
 function goToSlide(index) {
+  const hasClone = images.length > 1 && track.children.length > images.length;
+  const maxIndex = hasClone ? images.length : images.length - 1;
+
   if (isTransitioning || index === currentIndex || images.length === 0) return;
-  if (index < 0 || index >= images.length) return;
+  if (index < 0 || index > maxIndex) return;
 
   isTransitioning = true;
   stopAutoPlay();
   stopCurrentVideo();
 
+  const goingToClone = hasClone && index === images.length;
+
   currentIndex = index;
-  track.style.transform = `translateX(-${currentIndex * 100}%)`;
+  track.style.transform = `translateX(-${index * 100}%)`;
   updateDots();
 
-  const item = images[currentIndex];
-  setTimeout(() => {
-    isTransitioning = false;
-    afterSlideChange(item);
-  }, 500);
+  if (goingToClone) {
+    // 过渡到克隆体后，瞬间跳到真正的第一张
+    setTimeout(() => {
+      track.style.transition = 'none';
+      currentIndex = 0;
+      track.style.transform = 'translateX(0)';
+      updateDots();
+      track.offsetHeight; // 强制回流
+      track.style.transition = '';
+      isTransitioning = false;
+      afterSlideChange(images[0]);
+    }, 500);
+  } else {
+    setTimeout(() => {
+      isTransitioning = false;
+      afterSlideChange(images[index]);
+    }, 500);
+  }
 }
 
 // ---- 切换后处理：图片启动定时器，视频播放 ----
@@ -632,16 +662,39 @@ function afterSlideChange(item) {
 
 function prev() {
   if (images.length === 0) return;
-  goToSlide(currentIndex - 1 < 0 ? images.length - 1 : currentIndex - 1);
+  // 从第一张回退到最后一张时，无动画瞬间跳（避免反向滑过多张）
+  if (currentIndex === 0) {
+    isTransitioning = true;
+    stopAutoPlay();
+    stopCurrentVideo();
+    track.style.transition = 'none';
+    currentIndex = images.length - 1;
+    track.style.transform = `translateX(-${currentIndex * 100}%)`;
+    updateDots();
+    track.offsetHeight;
+    track.style.transition = '';
+    setTimeout(() => {
+      isTransitioning = false;
+      afterSlideChange(images[currentIndex]);
+    }, 50);
+  } else {
+    goToSlide(currentIndex - 1);
+  }
 }
 function next() {
   if (images.length === 0) return;
-  goToSlide((currentIndex + 1) % images.length);
+  const hasClone = track.children.length > images.length;
+  if (hasClone && currentIndex === images.length - 1) {
+    goToSlide(images.length); // 走克隆体
+  } else {
+    goToSlide((currentIndex + 1) % images.length);
+  }
 }
 
 function updateDots() {
+  const displayIndex = currentIndex >= images.length ? 0 : currentIndex;
   document.querySelectorAll('.carousel__dot').forEach((d, i) => {
-    d.classList.toggle('active', i === currentIndex);
+    d.classList.toggle('active', i === displayIndex);
   });
 }
 
