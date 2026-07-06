@@ -376,13 +376,6 @@ function buildCarousel(imgList) {
       slide.appendChild(imgEl);
     }
 
-    if (item.name) {
-      const label = document.createElement('div');
-      label.className = 'carousel__label';
-      label.textContent = (isVideo ? '🎬 ' : '') + item.name;
-      slide.appendChild(label);
-    }
-
     const typeTag = document.createElement('div');
     typeTag.className = 'carousel__media-type';
     typeTag.textContent = isVideo ? '🎬 视频' : '📷 图片';
