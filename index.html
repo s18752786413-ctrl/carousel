@@ -158,8 +158,8 @@
 <body>
 
 <div class="empty-state" id="emptyState">
-  <div class="empty-state__icon">🖼️</div>
-  <div class="empty-state__text">暂无图片或视频</div>
+  <div class="empty-state__icon" id="emptyStateIcon">⏳</div>
+  <div class="empty-state__text" id="emptyStateText">正在连接云端数据库…</div>
   <a class="empty-state__link" href="admin.html">📷 前往管理页上传</a>
 </div>
 
@@ -184,7 +184,28 @@ async function loadImages() {
   try {
     const snap = await db.collection(COLLECTION).orderBy('createdAt').get();
     return snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
-  } catch (e) { return []; }
+  } catch (e) {
+    console.error('[Firestore] 读取失败:', e);
+    showCloudError(e);
+    return [];
+  }
+}
+
+// 在空状态区显示云端连接错误（连接被墙 / 网络不通 / 权限不足等）
+function showCloudError(e) {
+  const icon = document.getElementById('emptyStateIcon');
+  const text = document.getElementById('emptyStateText');
+  if (icon) icon.textContent = '⚠️';
+  let hint = '无法连接云端数据库';
+  const code = (e && (e.code || e.message)) || '';
+  if (/permission|denied|insufficient/i.test(code)) {
+    hint = '数据库权限不足，请检查 Firestore 安全规则是否为测试模式';
+  } else if (/network|unavailable|failed-to|ERR_INTERNET|TIMEOUT/i.test(code)) {
+    hint = '网络无法访问云端服务器\n（该设备可能需要开启代理/VPN 才能连接 Firebase）';
+  }
+  if (text) text.textContent = hint;
+  emptyState.style.display = '';
+  carouselContainer.classList.remove('visible');
 }
 
 // ===== 轮播逻辑 =====
@@ -296,6 +317,10 @@ function buildCarousel(imgList) {
   currentIndex = 0;
 
   if (images.length === 0) {
+    const icon = document.getElementById('emptyStateIcon');
+    const text = document.getElementById('emptyStateText');
+    if (icon) icon.textContent = '🖼️';
+    if (text) text.textContent = '暂无图片或视频';
     emptyState.style.display = '';
     carouselContainer.classList.remove('visible');
     return;
@@ -604,7 +629,10 @@ function onFirstInteraction() {
 db.collection(COLLECTION).orderBy('createdAt').onSnapshot(snap => {
   const list = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
   buildCarousel(list);
-}, () => {});
+}, err => {
+  console.error('[Firestore] 实时监听失败:', err);
+  showCloudError(err);
+});
 
 // ===== 启动 =====
 soundEnabled = localStorage.getItem('carousel_sound_enabled') === 'true';
