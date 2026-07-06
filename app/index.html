@@ -192,17 +192,8 @@ function showCloudError(e) {
   carouselContainer.classList.remove('visible');
 }
 
-// 把云存储 fileID 批量转成可显示的 https 临时 URL（local 项）
-async function resolveUrls(items) {
-  const need = items.filter(i => i.source === 'local' && i.fileID);
-  if (need.length === 0) return items;
-  try {
-    const r = await app.getTempFileURL({ fileList: need.map(i => i.fileID) });
-    const map = {};
-    (r.fileList || []).forEach(f => { if (f.tempFileURL) map[f.fileID] = f.tempFileURL; });
-    return items.map(i => map[i.fileID] ? Object.assign({}, i, { url: map[i.fileID] }) : i);
-  } catch (e) { return items; }
-}
+// base64 直接可用，无需转换；此函数保留为透传以兼容调用
+async function resolveUrls(items) { return items; }
 
 // 从数据库快照提取 item 列表（含 id，按 createdAt 升序）
 function snapToList(snap) {

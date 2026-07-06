@@ -173,13 +173,8 @@ try {
 // 从数据库快照提取 item 列表（含 id）
 function snapToList(snap){ return (snap.docs||[]).map(d=>{ const data=d.data?d.data():d; return Object.assign({},data,{id:data._id||d.id}); }).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)); }
 
-// 把云存储 fileID 批量转 https 临时 URL（local 项缩略图需要）
-async function resolveUrls(items){
-  const need = items.filter(i=>i.source==='local' && i.fileID);
-  if(need.length===0) return items;
-  try{ const r=await app.getTempFileURL({fileList:need.map(i=>i.fileID)}); const map={}; (r.fileList||[]).forEach(f=>{if(f.tempFileURL)map[f.fileID]=f.tempFileURL;}); return items.map(i=>map[i.fileID]?Object.assign({},i,{url:map[i.fileID]}):i); }
-  catch(e){ return items; }
-}
+// base64 直接可用，无需转换；此函数保留为透传以兼容调用
+async function resolveUrls(items){ return items; }
 
 // 数据库 CRUD
 async function loadAll(){
@@ -189,13 +184,10 @@ async function loadAll(){
 }
 async function addToDB(entry){ return db.collection(COLLECTION).add(entry); }
 async function deleteFromDB(item){
-  if(item.fileID){ try{ await app.deleteFile({fileList:[item.fileID]}); }catch(e){} }
   return db.collection(COLLECTION).doc(item.id).remove();
 }
 async function clearAllDB(){
   const items = await loadAll();
-  const fileIDs = items.filter(i=>i.fileID).map(i=>i.fileID);
-  if(fileIDs.length){ try{ await app.deleteFile({fileList:fileIDs}); }catch(e){} }
   for(const it of items){ try{ await db.collection(COLLECTION).doc(it.id).remove(); }catch(e){} }
 }
 
@@ -239,14 +231,16 @@ function handleLocalFiles(files) {
     toAdd.forEach(file => {
       const isVideo = file.type.startsWith('video/');
       if (isVideo) vidCount++; else imgCount++;
-      const cloudPath = 'carousel/' + Date.now() + '-' + file.name.replace(/[^\w.\-]+/g,'_');
-      app.uploadFile({ cloudPath, filePath: file }).then(res => {
-        const fileID = res.fileID;
-        return addToDB({ url: fileID, fileID, name: file.name, mediaType: isVideo ? 'video' : 'image', source: 'local', createdAt: Date.now() });
-      }).then(() => {
-        loaded++;
-        if (loaded === toAdd.length) { refreshGrid(); let msg = `已添加 ${toAdd.length} 个`; if (imgCount && vidCount) msg += `（${imgCount} 图 + ${vidCount} 视频）`; else if (vidCount) msg += `视频`; else msg += `图片`; showToast(msg); }
-      }).catch(err => { showToast('上传失败：'+(err.message||err), true); });
+      const reader = new FileReader();
+      reader.onload = () => {
+        // base64 直接存数据库（不依赖云存储，绕过 PG 环境权限限制）
+        addToDB({ url: reader.result, name: file.name, mediaType: isVideo ? 'video' : 'image', source: 'local', createdAt: Date.now() }).then(() => {
+          loaded++;
+          if (loaded === toAdd.length) { refreshGrid(); let msg = `已添加 ${toAdd.length} 个`; if (imgCount && vidCount) msg += `（${imgCount} 图 + ${vidCount} 视频）`; else if (vidCount) msg += `视频`; else msg += `图片`; showToast(msg); }
+        }).catch(err => { showToast('上传失败：'+(err.message||err), true); });
+      };
+      reader.onerror = () => showToast('读取文件失败：'+file.name, true);
+      reader.readAsDataURL(file);
     });
   });
 }
@@ -363,11 +357,8 @@ migrateBtn.addEventListener('click', async () => {
     if(items.length===0){ showToast('无需导入的本地图片'); return; }
     let done=0;
     for(const it of items){
-      const blob=await (await fetch(it.url)).blob();
-      const file=new File([blob], it.name, {type:blob.type||'image/png'});
-      const cloudPath='carousel/migrated-'+it.createdAt+'-'+it.name.replace(/[^\w.\-]+/g,'_');
-      const res=await app.uploadFile({cloudPath, filePath:file});
-      await addToDB({url:res.fileID, fileID:res.fileID, name:it.name, mediaType:it.mediaType, source:'local', createdAt:it.createdAt});
+      // 旧 data.json 里 url 已是 base64，直接存数据库（不依赖云存储）
+      await addToDB({url:it.url, name:it.name, mediaType:it.mediaType, source:'local', createdAt:it.createdAt||Date.now()});
       done++;
     }
     showToast('已导入 '+done+' 个'); refreshGrid();
