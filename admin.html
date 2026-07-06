@@ -5,10 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>媒体管理 - 后台</title>
 
-<!-- Firebase CDN -->
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background: #0f0f1a; color: #e0e0e0; min-height: 100dvh; padding: 16px; overflow-y: auto; }
@@ -92,6 +88,20 @@
   </div>
 
   <div class="card">
+    <div class="sound-setting">
+      <div>
+        <div class="sound-setting__label">🔑 管理令牌（上传 / 删除必填）</div>
+        <div class="sound-setting__desc" id="tokenStatus">尚未设置</div>
+      </div>
+      <button class="btn" id="tokenBtn" type="button">设置令牌</button>
+    </div>
+    <div id="tokenPanel" style="display:none; margin-top:14px; gap:8px; flex-wrap:wrap; align-items:center;">
+      <input type="password" id="tokenInput" placeholder="粘贴 GitHub 令牌（ghp_ 或 github_pat_ 开头）" style="flex:1; min-width:220px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.15); border-radius:10px; color:#e0e0e0; padding:10px 12px; font-size:13px; font-family:inherit;">
+      <button class="btn" id="tokenSaveBtn" type="button">保存</button>
+    </div>
+  </div>
+
+  <div class="card">
     <div class="upload-zone" id="uploadZone">
       <div class="upload-zone__icon">📁</div>
       <div class="upload-zone__text">点击或拖拽上传图片 / 视频</div>
@@ -130,27 +140,80 @@
   </div>
 
   <div class="bottom-bar">
-    <span style="font-size:13px;color:rgba(255,255,255,0.35)">展示页实时同步，无需刷新</span>
+    <span style="font-size:13px;color:rgba(255,255,255,0.35)">上传后约 1 分钟展示页自动出现（GitHub Pages 重建）</span>
     <button class="btn btn--danger" id="clearAllBtn">🗑 清空全部</button>
   </div>
 </div>
 
-<script src="firebase-config.js"></script>
 <script>
-const COLLECTION = 'images';
 const MAX_ITEMS = 20;
 const VIDEO_EXTENSIONS = /\.(mp4|webm|mov|mkv|avi|flv|wmv|m4v|ogv|3gp)(\?.*)?$/i;
 
-// Firebase ops
-async function loadAll() {
-  try { const snap = await db.collection(COLLECTION).orderBy('createdAt').get(); return snap.docs.map(d => Object.assign({ id: d.id }, d.data())); }
-  catch (e) { return []; }
+// ===== GitHub 仓库即数据库：data.json 存于 Pages 同源，展示页手机可直连 =====
+const REPO = 's18752786413-ctrl/carousel';
+const BRANCH = 'main';
+const DATA_PATH = 'data.json';
+let _sha = null;
+
+function getToken(){ return localStorage.getItem('gh_token') || ''; }
+function apiHeaders(json){
+  const h = { 'Accept': 'application/vnd.github+json' };
+  if(json) h['Content-Type'] = 'application/json';
+  const t = getToken(); if(t) h['Authorization'] = 'Bearer ' + t;
+  return h;
 }
-async function addToDB(entry) { try { await db.collection(COLLECTION).add(entry); } catch (e) {} }
-async function deleteFromDB(id) { try { await db.collection(COLLECTION).doc(id).delete(); } catch (e) {} }
-async function clearAllDB() {
-  try { const snap = await db.collection(COLLECTION).get(); const batch = db.batch(); snap.forEach(doc => batch.delete(doc.ref)); await batch.commit(); }
-  catch (e) {}
+function utf8ToB64(s){ return btoa(unescape(encodeURIComponent(s))); }
+function b64ToUtf8(s){ return decodeURIComponent(escape(atob(String(s).replace(/\s/g,'')))); }
+function normalize(items){ return (items||[]).slice().sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)); }
+function decodeItems(b64){ return normalize(JSON.parse(b64ToUtf8(b64)).items||[]); }
+function genId(){ return 'm'+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+
+// 读取：优先 GitHub Contents API（实时，不受 Pages 缓存影响）；不可达则回退同源 data.json
+async function loadAll(){
+  try {
+    const r = await fetch(`https://api.github.com/repos/${REPO}/contents/${DATA_PATH}?ref=${BRANCH}&t=${Date.now()}`, { headers: apiHeaders() });
+    if(r.ok){ const j=await r.json(); _sha=j.sha; return decodeItems(j.content); }
+    if(r.status===404){ _sha=null; return []; }
+  } catch(e){}
+  try {
+    const r = await fetch(DATA_PATH+'?t='+Date.now(), { cache:'no-store' });
+    if(r.ok){ const d=await r.json(); return normalize(d.items||[]); }
+  } catch(e){}
+  return [];
+}
+
+// 写入：串行化，避免并发 PUT 的 sha 冲突
+let _chain = Promise.resolve();
+function withData(mutator, msg){
+  const run = async () => {
+    const items = await loadAll();
+    let next; try { next = mutator(items); } catch(e){ throw e; }
+    if(next.length > MAX_ITEMS) next = next.slice(0, MAX_ITEMS);
+    const body = { message: msg || 'update', content: utf8ToB64(JSON.stringify({items: next}, null, 2)), branch: BRANCH };
+    if(_sha) body.sha = _sha;
+    const r = await fetch(`https://api.github.com/repos/${REPO}/contents/${DATA_PATH}`, { method:'PUT', headers: apiHeaders(true), body: JSON.stringify(body) });
+    if(!r.ok){
+      const t = await r.text().catch(()=> '');
+      let m = '保存失败 ('+r.status+')';
+      if(r.status===401) m='令牌无效或已过期，请重新设置';
+      else if(r.status===409) m='版本冲突，请重试';
+      else if(r.status===403 && /rate limit/i.test(t)) m='GitHub API 限流，请稍后重试';
+      else if(r.status===403 && /resource access/i.test(t)) m='令牌无该仓库权限，请检查令牌范围';
+      throw new Error(m);
+    }
+    const j = await r.json(); _sha = j.content.sha;
+    return next;
+  };
+  _chain = _chain.then(run, run);
+  return _chain;
+}
+async function addToDB(entry){ return withData(items=>[...items, {...entry, id: genId()}], 'add '+(entry.name||'')); }
+async function deleteFromDB(id){ return withData(items=>items.filter(i=>i.id!==id), 'delete '+id); }
+async function clearAllDB(){ return withData(()=>[], 'clear all'); }
+
+function requireToken(){
+  if(!getToken()){ showToast('请先设置 GitHub 令牌再上传 / 删除', true); if(tokenBtn) tokenBtn.click(); return false; }
+  return true;
 }
 
 // DOM
@@ -159,7 +222,10 @@ const uploadZone=document.getElementById('uploadZone'),fileInput=document.getEle
   grid=document.getElementById('grid'),gridTitle=document.getElementById('gridTitle'),
   gridEmpty=document.getElementById('gridEmpty'),headerCount=document.getElementById('headerCount'),
   clearAllBtn=document.getElementById('clearAllBtn'),toastContainer=document.getElementById('toastContainer'),
-  globalOverlay=document.getElementById('globalDropOverlay');
+  globalOverlay=document.getElementById('globalDropOverlay'),
+  tokenBtn=document.getElementById('tokenBtn'),tokenPanel=document.getElementById('tokenPanel'),
+  tokenInput=document.getElementById('tokenInput'),tokenSaveBtn=document.getElementById('tokenSaveBtn'),
+  tokenStatus=document.getElementById('tokenStatus');
 
 function showToast(msg, warn = false) {
   const el = document.createElement('div');
@@ -171,6 +237,7 @@ function showToast(msg, warn = false) {
 
 // Local upload
 function handleLocalFiles(files) {
+  if(!requireToken()) return;
   const validFiles = Array.from(files).filter(f => f.type.startsWith('image/') || f.type.startsWith('video/'));
   if (validFiles.length === 0) { showToast('未检测到图片或视频文件', true); return; }
 
@@ -189,7 +256,7 @@ function handleLocalFiles(files) {
         addToDB({ url: reader.result, name: file.name, mediaType: isVideo ? 'video' : 'image', source: 'local', createdAt: Date.now() }).then(() => {
           loaded++;
           if (loaded === toAdd.length) { refreshGrid(); let msg = `已添加 ${toAdd.length} 个`; if (imgCount && vidCount) msg += `（${imgCount} 图 + ${vidCount} 视频）`; else if (vidCount) msg += `视频`; else msg += `图片`; showToast(msg); }
-        });
+        }).catch(err => { showToast(err.message || '上传失败', true); });
       };
       reader.readAsDataURL(file);
     });
@@ -198,6 +265,7 @@ function handleLocalFiles(files) {
 
 // URL load
 async function handleUrls() {
+  if(!requireToken()) return;
   const raw = urlTextarea.value.trim();
   if (!raw) { showToast('请粘贴链接', true); return; }
   const lines = raw.split('\n').map(l => l.trim()).filter(l => l.length > 0 && /^https?:\/\/.+/.test(l));
@@ -214,7 +282,7 @@ async function handleUrls() {
     let name = ''; try { name = new URL(u).pathname.split('/').pop() || u; } catch { name = u; }
     const isVideo = VIDEO_EXTENSIONS.test(u);
     if (isVideo) vidCount++; else imgCount++;
-    try { await addToDB({ url: u, name, mediaType: isVideo ? 'video' : 'image', source: 'remote', createdAt: Date.now() }); added++; } catch (e) {}
+    try { await addToDB({ url: u, name, mediaType: isVideo ? 'video' : 'image', source: 'remote', createdAt: Date.now() }); added++; } catch (e) { showToast(e.message || '添加失败', true); break; }
   }
   urlTextarea.value = '';
   refreshGrid();
@@ -257,7 +325,7 @@ async function refreshGrid() {
 
     const del = document.createElement('button'); del.className='grid__item__delete';
     del.innerHTML='×'; del.title='删除';
-    del.addEventListener('click', e => { e.stopPropagation(); deleteFromDB(item.id).then(() => { refreshGrid(); showToast('已删除'); }); });
+    del.addEventListener('click', e => { e.stopPropagation(); if(!requireToken()) return; deleteFromDB(item.id).then(() => { refreshGrid(); showToast('已删除'); }).catch(err => showToast(err.message || '删除失败', true)); });
     d.appendChild(del);
 
     d.addEventListener('click', () => { window.open(item.url, '_blank'); });
@@ -284,7 +352,14 @@ const soundToggle = document.getElementById('soundToggle');
 soundToggle.checked = localStorage.getItem('carousel_sound_enabled') === 'true';
 soundToggle.addEventListener('change', () => { localStorage.setItem('carousel_sound_enabled', soundToggle.checked ? 'true' : 'false'); showToast(soundToggle.checked ? '已开启视频声音' : '已关闭视频声音（静音）'); });
 
-clearAllBtn.addEventListener('click', () => { if (!confirm('确定要清空全部内容吗？')) return; clearAllDB().then(() => { refreshGrid(); showToast('已清空全部'); }); });
+// 令牌管理
+function updateTokenStatus(){ const t=getToken(); tokenStatus.textContent = t ? '✅ 令牌已设置（可上传 / 删除）' : '❌ 未设置令牌（无法上传 / 删除）'; tokenBtn.textContent = t ? '修改令牌' : '设置令牌'; }
+tokenBtn.addEventListener('click', () => { tokenPanel.style.display='flex'; tokenInput.value=getToken(); tokenInput.focus(); });
+tokenSaveBtn.addEventListener('click', () => { const v=tokenInput.value.trim(); if(v) localStorage.setItem('gh_token', v); else localStorage.removeItem('gh_token'); updateTokenStatus(); tokenPanel.style.display='none'; showToast(v ? '令牌已保存' : '令牌已清除'); });
+tokenInput.addEventListener('keydown', e => { if(e.key==='Enter') tokenSaveBtn.click(); });
+updateTokenStatus();
+
+clearAllBtn.addEventListener('click', () => { if(!requireToken()) return; if (!confirm('确定要清空全部内容吗？')) return; clearAllDB().then(() => { refreshGrid(); showToast('已清空全部'); }).catch(err => showToast(err.message || '清空失败', true)); });
 
 refreshGrid();
 </script>

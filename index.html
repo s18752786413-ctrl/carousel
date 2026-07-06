@@ -5,10 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>图片视频轮播展示</title>
 
-<!-- Firebase CDN -->
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -159,7 +155,7 @@
 
 <div class="empty-state" id="emptyState">
   <div class="empty-state__icon" id="emptyStateIcon">⏳</div>
-  <div class="empty-state__text" id="emptyStateText">正在连接云端数据库…</div>
+  <div class="empty-state__text" id="emptyStateText">正在加载图片…</div>
   <a class="empty-state__link" href="admin.html">📷 前往管理页上传</a>
 </div>
 
@@ -175,35 +171,30 @@
   <a class="admin-link" href="admin.html">📷 管理图片/视频</a>
 </div>
 
-<script src="firebase-config.js"></script>
 <script>
-// ===== Firebase 数据读取 =====
-const COLLECTION = 'images';
+// ===== 数据读取：从同源 data.json 读取（与展示页同站托管，手机可直连）=====
+const DATA_URL = 'data.json';
 
 async function loadImages() {
   try {
-    const snap = await db.collection(COLLECTION).orderBy('createdAt').get();
-    return snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
+    const res = await fetch(DATA_URL, { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    return (data.items || []).slice().sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
   } catch (e) {
-    console.error('[Firestore] 读取失败:', e);
+    console.error('[data.json] 读取失败:', e);
     showCloudError(e);
-    return [];
+    return null;
   }
 }
 
-// 在空状态区显示云端连接错误（连接被墙 / 网络不通 / 权限不足等）
+// 在空状态区显示数据读取错误
 function showCloudError(e) {
   const icon = document.getElementById('emptyStateIcon');
   const text = document.getElementById('emptyStateText');
   if (icon) icon.textContent = '⚠️';
-  let hint = '无法连接云端数据库';
-  const code = (e && (e.code || e.message)) || '';
-  if (/permission|denied|insufficient/i.test(code)) {
-    hint = '数据库权限不足，请检查 Firestore 安全规则是否为测试模式';
-  } else if (/network|unavailable|failed-to|ERR_INTERNET|TIMEOUT/i.test(code)) {
-    hint = '网络无法访问云端服务器\n（该设备可能需要开启代理/VPN 才能连接 Firebase）';
-  }
-  if (text) text.textContent = hint;
+  const msg = (e && e.message) ? e.message : '未知错误';
+  if (text) text.textContent = '数据加载失败：' + msg + '\n请刷新页面重试';
   emptyState.style.display = '';
   carouselContainer.classList.remove('visible');
 }
@@ -625,18 +616,16 @@ function onFirstInteraction() {
   document.addEventListener(evt, onFirstInteraction, { once: true });
 });
 
-// ===== Firebase 实时同步 =====
-db.collection(COLLECTION).orderBy('createdAt').onSnapshot(snap => {
-  const list = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
-  buildCarousel(list);
-}, err => {
-  console.error('[Firestore] 实时监听失败:', err);
-  showCloudError(err);
-});
+// ===== 轮询 data.json，检测管理页新上传的内容（每 10 秒）=====
+async function refreshData() {
+  const list = await loadImages();
+  if (list && JSON.stringify(list) !== JSON.stringify(images)) buildCarousel(list);
+}
+setInterval(refreshData, 10000);
 
 // ===== 启动 =====
 soundEnabled = localStorage.getItem('carousel_sound_enabled') === 'true';
-loadImages().then(list => buildCarousel(list));
+(async () => { const list = await loadImages(); if (list) buildCarousel(list); })();
 </script>
 </body>
 </html>
