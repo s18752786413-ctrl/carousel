@@ -4,8 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>图片视频轮播展示</title>
+
+<!-- Firebase CDN -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
 <style>
-  /* ===== 全局 ===== */
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   body {
@@ -22,7 +26,6 @@
     overflow-x: hidden;
   }
 
-  /* ===== 空状态 ===== */
   .empty-state {
     display: flex;
     flex-direction: column;
@@ -30,253 +33,123 @@
     gap: 16px;
     text-align: center;
   }
-
   .empty-state__icon { font-size: 56px; opacity: 0.5; }
   .empty-state__text { font-size: 18px; color: rgba(255,255,255,0.5); }
   .empty-state__link {
-    color: #7eb8ff;
-    text-decoration: none;
-    font-size: 15px;
-    padding: 10px 24px;
-    border-radius: 22px;
-    border: 1px solid rgba(126,184,255,0.3);
-    transition: all 0.25s;
+    color: #7eb8ff; text-decoration: none; font-size: 15px;
+    padding: 10px 24px; border-radius: 22px;
+    border: 1px solid rgba(126,184,255,0.3); transition: all 0.25s;
   }
   .empty-state__link:hover { background: rgba(126,184,255,0.1); border-color: rgba(126,184,255,0.6); }
 
-  /* ===== 轮播容器 ===== */
-  .carousel-container {
-    display: none;
-    width: 100%;
-    flex-direction: column;
-    align-items: center;
-    gap: 14px;
-  }
+  .carousel-container { display: none; width: 100%; flex-direction: column; align-items: center; gap: 14px; }
   .carousel-container.visible { display: flex; }
 
   .carousel {
-    position: relative;
-    width: min(92vw, 960px);
-    aspect-ratio: 16 / 9;
-    border-radius: 16px;
-    overflow: hidden;
+    position: relative; width: min(92vw, 960px); aspect-ratio: 16 / 9;
+    border-radius: 16px; overflow: hidden;
     box-shadow: 0 20px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05);
     background: #1a1a2e;
   }
 
   .carousel__track {
-    display: flex;
-    height: 100%;
+    display: flex; height: 100%;
     transition: transform 0.5s cubic-bezier(0.25,0.46,0.45,0.94);
     will-change: transform;
   }
 
   .carousel__slide {
-    flex: 0 0 100%;
-    height: 100%;
-    position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    flex: 0 0 100%; height: 100%; position: relative;
+    display: flex; align-items: center; justify-content: center;
     background: #0a0a16;
   }
 
-  .carousel__slide img,
-  .carousel__slide video {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
+  .carousel__slide img, .carousel__slide video {
+    width: 100%; height: 100%; object-fit: cover; display: block;
   }
 
-  /* 视频播放图标 */
   .carousel__video-icon {
-    position: absolute;
-    top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
-    font-size: 48px;
-    opacity: 0.35;
-    pointer-events: none;
-    z-index: 2;
-    transition: opacity 0.3s;
-    text-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    font-size: 48px; opacity: 0.35; pointer-events: none; z-index: 2;
+    transition: opacity 0.3s; text-shadow: 0 2px 8px rgba(0,0,0,0.5);
   }
   .carousel__slide.playing .carousel__video-icon { opacity: 0; }
 
-  /* 名称标签 */
   .carousel__label {
-    position: absolute;
-    bottom: 40px;
-    left: 16px;
-    font-size: 12px;
-    color: rgba(255,255,255,0.7);
-    background: rgba(0,0,0,0.45);
-    backdrop-filter: blur(4px);
-    padding: 3px 10px;
-    border-radius: 10px;
-    max-width: calc(100% - 32px);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    pointer-events: none;
-    z-index: 3;
+    position: absolute; bottom: 40px; left: 16px; font-size: 12px;
+    color: rgba(255,255,255,0.7); background: rgba(0,0,0,0.45);
+    backdrop-filter: blur(4px); padding: 3px 10px; border-radius: 10px;
+    max-width: calc(100% - 32px); overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; pointer-events: none; z-index: 3;
   }
 
   .carousel__media-type {
-    position: absolute;
-    top: 16px;
-    left: 16px;
-    font-size: 11px;
-    padding: 2px 8px;
-    border-radius: 8px;
-    background: rgba(0,0,0,0.4);
-    backdrop-filter: blur(4px);
-    color: rgba(255,255,255,0.6);
-    pointer-events: none;
-    z-index: 3;
+    position: absolute; top: 16px; left: 16px; font-size: 11px;
+    padding: 2px 8px; border-radius: 8px; background: rgba(0,0,0,0.4);
+    backdrop-filter: blur(4px); color: rgba(255,255,255,0.6);
+    pointer-events: none; z-index: 3;
   }
 
-  /* ===== 箭头 ===== */
+  .carousel__sound-btn {
+    position: absolute; bottom: 40px; right: 16px;
+    width: 36px; height: 36px; border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.3); background: rgba(0,0,0,0.55);
+    backdrop-filter: blur(6px); color: #fff; font-size: 13px; font-weight: 700;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    z-index: 10; transition: background 0.2s, border-color 0.2s; letter-spacing: 1px;
+  }
+  .carousel__sound-btn:hover { background: rgba(0,0,0,0.75); border-color: rgba(255,255,255,0.6); }
+
   .carousel__arrow {
-    position: absolute;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
-    border: none;
-    background: rgba(255,255,255,0.12);
-    backdrop-filter: blur(8px);
-    color: #fff;
-    font-size: 22px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: background 0.3s, transform 0.2s;
-    z-index: 10;
+    position: absolute; top: 50%; transform: translateY(-50%);
+    width: 48px; height: 48px; border-radius: 50%; border: none;
+    background: rgba(255,255,255,0.12); backdrop-filter: blur(8px);
+    color: #fff; font-size: 22px; cursor: pointer; display: flex;
+    align-items: center; justify-content: center;
+    transition: background 0.3s, transform 0.2s; z-index: 10;
   }
   .carousel__arrow:hover { background: rgba(255,255,255,0.25); transform: translateY(-50%) scale(1.08); }
   .carousel__arrow:active { transform: translateY(-50%) scale(0.95); }
   .carousel__arrow--left  { left: 16px; }
   .carousel__arrow--right { right: 16px; }
 
-  /* ===== 圆点 ===== */
-  .carousel__dots {
-    position: absolute;
-    bottom: 16px;
-    left: 50%;
-    transform: translateX(-50%);
-    display: flex;
-    gap: 10px;
-    z-index: 10;
-  }
+  .carousel__dots { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; z-index: 10; }
   .carousel__dot {
-    width: 10px; height: 10px;
-    border-radius: 50%;
-    border: none;
-    background: rgba(255,255,255,0.35);
-    cursor: pointer;
-    transition: all 0.3s ease;
-    padding: 0;
+    width: 10px; height: 10px; border-radius: 50%; border: none;
+    background: rgba(255,255,255,0.35); cursor: pointer; transition: all 0.3s ease; padding: 0;
   }
-  .carousel__dot.active {
-    background: #fff;
-    width: 28px;
-    border-radius: 5px;
-    box-shadow: 0 0 12px rgba(255,255,255,0.4);
-  }
+  .carousel__dot.active { background: #fff; width: 28px; border-radius: 5px; box-shadow: 0 0 12px rgba(255,255,255,0.4); }
   .carousel__dot:hover:not(.active) { background: rgba(255,255,255,0.6); }
 
-  /* ===== 进度条 ===== */
   .carousel__progress {
-    position: absolute;
-    bottom: 0; left: 0;
-    height: 3px;
-    background: rgba(255,255,255,0.5);
-    z-index: 10;
-    transition: width 0.1s linear;
-    width: 0%;
+    position: absolute; bottom: 0; left: 0; height: 3px;
+    background: rgba(255,255,255,0.5); z-index: 10; transition: width 0.1s linear; width: 0;
   }
 
-  /* ===== 底部管理链接 ===== */
-  .admin-link {
-    font-size: 12px;
-    color: rgba(255,255,255,0.3);
-    text-decoration: none;
-    transition: color 0.2s;
-  }
+  .admin-link { font-size: 12px; color: rgba(255,255,255,0.3); text-decoration: none; transition: color 0.2s; }
   .admin-link:hover { color: rgba(255,255,255,0.6); }
 
-  /* ===== 全屏按钮 ===== */
-  /* ===== 声音切换按钮 ===== */
-  .carousel__sound-btn {
-    position: absolute;
-    bottom: 40px;
-    right: 16px;
-    width: 36px; height: 36px;
-    border-radius: 50%;
-    border: 1px solid rgba(255,255,255,0.3);
-    background: rgba(0,0,0,0.55);
-    backdrop-filter: blur(6px);
-    color: #fff;
-    font-size: 13px;
-    font-weight: 700;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 10;
-    transition: background 0.2s, border-color 0.2s;
-    letter-spacing: 1px;
-  }
-  .carousel__sound-btn:hover { background: rgba(0,0,0,0.75); border-color: rgba(255,255,255,0.6); }
-
   .fullscreen-btn {
-    position: absolute;
-    top: 16px;
-    right: 16px;
-    width: 36px; height: 36px;
-    border-radius: 50%;
-    border: none;
-    background: rgba(0,0,0,0.35);
-    backdrop-filter: blur(6px);
-    color: #fff;
-    font-size: 16px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 10;
+    position: absolute; top: 16px; right: 16px; width: 36px; height: 36px;
+    border-radius: 50%; border: none; background: rgba(0,0,0,0.35);
+    backdrop-filter: blur(6px); color: #fff; font-size: 16px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; z-index: 10;
     transition: background 0.2s;
   }
   .fullscreen-btn:hover { background: rgba(0,0,0,0.55); }
 
-  /* ===== 响应式 ===== */
   @media (max-width: 640px) {
     body { padding: 10px; gap: 12px; }
-
-    .carousel {
-      width: 96vw;
-      aspect-ratio: 4 / 3;
-      border-radius: 10px;
-    }
-
-    .carousel__arrow {
-      width: 36px; height: 36px;
-      font-size: 16px;
-    }
+    .carousel { width: 96vw; aspect-ratio: 4/3; border-radius: 10px; }
+    .carousel__arrow { width: 36px; height: 36px; font-size: 16px; }
     .carousel__arrow--left  { left: 8px; }
     .carousel__arrow--right { right: 8px; }
-
     .carousel__dots { bottom: 10px; gap: 8px; }
     .carousel__dot { width: 8px; height: 8px; }
     .carousel__dot.active { width: 22px; }
-
     .carousel__label { bottom: 32px; left: 8px; font-size: 10px; }
     .carousel__media-type { top: 10px; left: 10px; font-size: 10px; }
     .carousel__video-icon { font-size: 36px; }
-
     .carousel__sound-btn { bottom: 32px; right: 10px; width: 30px; height: 30px; font-size: 11px; }
     .fullscreen-btn { top: 10px; right: 10px; width: 30px; height: 30px; font-size: 14px; }
   }
@@ -284,14 +157,12 @@
 </head>
 <body>
 
-<!-- 空状态 -->
 <div class="empty-state" id="emptyState">
   <div class="empty-state__icon">🖼️</div>
   <div class="empty-state__text">暂无图片或视频</div>
   <a class="empty-state__link" href="admin.html">📷 前往管理页上传</a>
 </div>
 
-<!-- 轮播容器 -->
 <div class="carousel-container" id="carouselContainer">
   <div class="carousel" id="carousel">
     <div class="carousel__track" id="carouselTrack"></div>
@@ -304,53 +175,30 @@
   <a class="admin-link" href="admin.html">📷 管理图片/视频</a>
 </div>
 
+<script src="firebase-config.js"></script>
 <script>
-// ============================================================
-//  IndexedDB 操作
-// ============================================================
-const DB_NAME = 'ImageCarousel';
-const DB_STORE = 'images';
-const DB_VERSION = 1;
-
-function openDB() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
-      if (!req.result.objectStoreNames.contains(DB_STORE)) {
-        req.result.createObjectStore(DB_STORE, { keyPath: 'id', autoIncrement: true });
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
+// ===== Firebase 数据读取 =====
+const COLLECTION = 'images';
 
 async function loadImages() {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(DB_STORE, 'readonly');
-    const store = tx.objectStore(DB_STORE);
-    const req = store.getAll();
-    req.onsuccess = () => { db.close(); resolve(req.result || []); };
-    req.onerror = () => { db.close(); reject(req.error); };
-  });
+  try {
+    const snap = await db.collection(COLLECTION).orderBy('createdAt').get();
+    return snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
+  } catch (e) { return []; }
 }
 
-// ============================================================
-//  轮播逻辑
-// ============================================================
-const AUTO_INTERVAL = 3000; // 图片展示秒数
+// ===== 轮播逻辑 =====
+const AUTO_INTERVAL = 3000;
 let images = [];
 let currentIndex = 0;
 let autoTimer = null;
 let videoProgressTimer = null;
 let isTransitioning = false;
-let currentVideo = null; // 当前播放的视频元素引用
-let soundEnabled = false; // 用户是否开启声音（点击声音按钮后变为 true）
+let currentVideo = null;
+let soundEnabled = false;
 
-// DOM
 const emptyState       = document.getElementById('emptyState');
-const carouselContainer = document.getElementById('carouselContainer');
+const carouselContainer= document.getElementById('carouselContainer');
 const carousel         = document.getElementById('carousel');
 const track            = document.getElementById('carouselTrack');
 const prevBtn          = document.getElementById('prevBtn');
@@ -359,7 +207,6 @@ const dotsContainer    = document.getElementById('carouselDots');
 const progressBar      = document.getElementById('progressBar');
 const fullscreenBtn    = document.getElementById('fullscreenBtn');
 
-// ---- 停止当前视频 ----
 function stopCurrentVideo() {
   if (currentVideo) {
     currentVideo.pause();
@@ -371,106 +218,73 @@ function stopCurrentVideo() {
   if (videoProgressTimer) { clearInterval(videoProgressTimer); videoProgressTimer = null; }
 }
 
-// ---- 播放视频并监听结束 ----
 function playVideo(videoEl) {
   stopCurrentVideo();
   currentVideo = videoEl;
   const slide = videoEl.parentElement;
 
-  // 根据全局声音状态设置静音
   videoEl.muted = !soundEnabled;
-
-  // 更新声音按钮图标
   const soundBtn = slide.querySelector('.carousel__sound-btn');
   if (soundBtn) {
     soundBtn.textContent = soundEnabled ? 'ON' : 'OFF';
     soundBtn.title = soundEnabled ? '点击静音' : '点击开启声音';
   }
 
-  // 隐藏播放图标
   slide.classList.add('playing');
   const icon = slide.querySelector('.carousel__video-icon');
   if (icon) icon.style.display = 'none';
 
   videoEl.currentTime = 0;
-
-  // 清旧 ended 事件
   videoEl.onended = null;
 
   const tryPlay = () => {
     videoEl.play().then(() => {
-      // 播放成功
       slide.classList.add('playing');
       if (icon) icon.style.display = 'none';
-
-      // 视频进度条更新
       if (videoProgressTimer) clearInterval(videoProgressTimer);
       videoProgressTimer = setInterval(() => {
         if (videoEl.duration && videoEl.duration > 0) {
-          const pct = (videoEl.currentTime / videoEl.duration) * 100;
           progressBar.style.transition = 'none';
-          progressBar.style.width = pct + '%';
+          progressBar.style.width = (videoEl.currentTime / videoEl.duration * 100) + '%';
         }
       }, 100);
-
-      // 视频结束 → 切下一个
-      videoEl.onended = () => {
-        stopCurrentVideo();
-        next();
-      };
+      videoEl.onended = () => { stopCurrentVideo(); next(); };
     }).catch(() => {
-      // 浏览器阻止自动播放 → 显示播放按钮，等用户点击
       slide.classList.remove('playing');
       if (icon) {
-        icon.style.display = '';
-        icon.style.pointerEvents = 'auto';
-        icon.style.cursor = 'pointer';
-        icon.title = '点击开始播放';
-        // 用户点一次后，浏览器就会允许后续自动播放
+        icon.style.display = ''; icon.style.pointerEvents = 'auto';
+        icon.style.cursor = 'pointer'; icon.title = '点击开始播放';
         const clickToStart = () => {
-          icon.style.pointerEvents = 'none';
-          icon.style.cursor = '';
+          icon.style.pointerEvents = 'none'; icon.style.cursor = '';
           icon.style.display = 'none';
           icon.removeEventListener('click', clickToStart);
-          // 先让浏览器记录用户手势，然后用一个微小的延迟确保 play 成功
           videoEl.play().then(() => {
             slide.classList.add('playing');
             if (videoProgressTimer) clearInterval(videoProgressTimer);
             videoProgressTimer = setInterval(() => {
               if (videoEl.duration && videoEl.duration > 0) {
-                const pct = (videoEl.currentTime / videoEl.duration) * 100;
                 progressBar.style.transition = 'none';
-                progressBar.style.width = pct + '%';
+                progressBar.style.width = (videoEl.currentTime / videoEl.duration * 100) + '%';
               }
             }, 100);
-            videoEl.onended = () => {
-              stopCurrentVideo();
-              next();
-            };
-          }).catch(() => {}); // 这次应该成功，因为有用户手势
+            videoEl.onended = () => { stopCurrentVideo(); next(); };
+          }).catch(() => {});
         };
         icon.addEventListener('click', clickToStart);
       }
     });
   };
 
-  // 等待视频数据就绪再播放
-  if (videoEl.readyState >= 2) {
-    tryPlay();
-  } else {
-    videoEl.addEventListener('canplay', tryPlay, { once: true });
-    videoEl.load(); // 强制加载
-  }
+  if (videoEl.readyState >= 2) { tryPlay(); }
+  else { videoEl.addEventListener('canplay', tryPlay, { once: true }); videoEl.load(); }
 }
 
-// ---- 启动图片定时器 ----
 function startImageTimer() {
   stopAutoPlay();
   resetProgressBar();
   autoTimer = setInterval(next, AUTO_INTERVAL);
 }
 
-// ---- 构建轮播 ----
 function buildCarousel(imgList) {
   stopAutoPlay();
   stopCurrentVideo();
@@ -493,11 +307,9 @@ function buildCarousel(imgList) {
   images.forEach((item, i) => {
     const slide = document.createElement('div');
     slide.className = 'carousel__slide';
-
     const isVideo = item.mediaType === 'video';
 
     if (isVideo) {
-      // 视频
       const videoEl = document.createElement('video');
       videoEl.src = item.url;
       videoEl.muted = true;
@@ -509,15 +321,10 @@ function buildCarousel(imgList) {
       videoEl.setAttribute('webkit-playsinline', '');
       videoEl.setAttribute('autoplay', '');
       videoEl.setAttribute('x5-video-player-type', 'h5');
-      videoEl.setAttribute('x5-video-player-fullscreen', 'true');
-      videoEl.setAttribute('x5-video-orientation', 'landscape');
-      videoEl.style.width = '100%';
-      videoEl.style.height = '100%';
-      videoEl.style.objectFit = 'cover';
+      videoEl.style.width = '100%'; videoEl.style.height = '100%'; videoEl.style.objectFit = 'cover';
       slide.appendChild(videoEl);
 
-      // 视频播放图标（播放时自动隐藏，失败时显示可点击）
-      // 声音切换按钮
+      // 声音按钮
       const soundBtn = document.createElement('button');
       soundBtn.className = 'carousel__sound-btn';
       soundBtn.textContent = 'OFF';
@@ -526,15 +333,12 @@ function buildCarousel(imgList) {
         e.stopPropagation();
         soundEnabled = !soundEnabled;
         localStorage.setItem('carousel_sound_enabled', soundEnabled ? 'true' : 'false');
-        // 更新所有视频 slide 的声音按钮图标
         document.querySelectorAll('.carousel__sound-btn').forEach(b => {
           b.textContent = soundEnabled ? 'ON' : 'OFF';
           b.title = soundEnabled ? '点击静音' : '点击开启声音';
         });
-        // 更新当前播放视频的静音状态
         if (currentVideo) {
           currentVideo.muted = !soundEnabled;
-          // 如果开声音且视频暂停了，重新播放（因为有用户手势）
           if (soundEnabled && currentVideo.paused) {
             currentVideo.currentTime = currentVideo.currentTime || 0;
             currentVideo.play().catch(() => {});
@@ -549,7 +353,6 @@ function buildCarousel(imgList) {
       icon.style.pointerEvents = 'none';
       slide.appendChild(icon);
     } else {
-      // 图片
       const imgEl = document.createElement('img');
       imgEl.src = item.url;
       imgEl.alt = item.name || '图片';
@@ -557,7 +360,6 @@ function buildCarousel(imgList) {
       slide.appendChild(imgEl);
     }
 
-    // 名称标签
     if (item.name) {
       const label = document.createElement('div');
       label.className = 'carousel__label';
@@ -565,7 +367,6 @@ function buildCarousel(imgList) {
       slide.appendChild(label);
     }
 
-    // 媒体类型标签
     const typeTag = document.createElement('div');
     typeTag.className = 'carousel__media-type';
     typeTag.textContent = isVideo ? '🎬 视频' : '📷 图片';
@@ -583,10 +384,9 @@ function buildCarousel(imgList) {
     dotsContainer.appendChild(dot);
   });
 
-  // 末尾克隆第一张，实现无缝循环
+  // 末尾克隆第一张实现无缝循环
   if (images.length > 1) {
-    const firstSlide = track.children[0];
-    const clone = firstSlide.cloneNode(true);
+    const clone = track.children[0].cloneNode(true);
     clone.classList.add('carousel__slide--clone');
     track.appendChild(clone);
   }
@@ -594,17 +394,14 @@ function buildCarousel(imgList) {
   track.style.transition = 'none';
   track.style.transform = 'translateX(0)';
   updateDots();
-  // 强制回流后恢复过渡
   track.offsetHeight;
   track.style.transition = '';
   afterSlideChange();
 }
 
-// ---- 切换 ----
 function goToSlide(index) {
   const hasClone = images.length > 1 && track.children.length > images.length;
   const maxIndex = hasClone ? images.length : images.length - 1;
-
   if (isTransitioning || index === currentIndex || images.length === 0) return;
   if (index < 0 || index > maxIndex) return;
 
@@ -613,19 +410,17 @@ function goToSlide(index) {
   stopCurrentVideo();
 
   const goingToClone = hasClone && index === images.length;
-
   currentIndex = index;
   track.style.transform = `translateX(-${index * 100}%)`;
   updateDots();
 
   if (goingToClone) {
-    // 过渡到克隆体后，瞬间跳到真正的第一张
     setTimeout(() => {
       track.style.transition = 'none';
       currentIndex = 0;
       track.style.transform = 'translateX(0)';
       updateDots();
-      track.offsetHeight; // 强制回流
+      track.offsetHeight;
       track.style.transition = '';
       isTransitioning = false;
       afterSlideChange(images[0]);
@@ -638,31 +433,24 @@ function goToSlide(index) {
   }
 }
 
-// ---- 切换后处理：图片启动定时器，视频播放 ----
 function afterSlideChange(item) {
   if (!item) item = images[currentIndex];
   if (!item) return;
-
   const slide = track.children[currentIndex];
   if (!slide) return;
 
   if (item.mediaType === 'video') {
-    // 视频：直接播放，不用定时器
     const videoEl = slide.querySelector('video');
-    if (videoEl) {
-      playVideo(videoEl);
-    }
+    if (videoEl) playVideo(videoEl);
     progressBar.style.transition = 'none';
     progressBar.style.width = '0%';
   } else {
-    // 图片：启动定时器 + 进度条
     startImageTimer();
   }
 }
 
 function prev() {
   if (images.length === 0) return;
-  // 从第一张回退到最后一张时，无动画瞬间跳（避免反向滑过多张）
   if (currentIndex === 0) {
     isTransitioning = true;
     stopAutoPlay();
@@ -681,11 +469,12 @@ function prev() {
     goToSlide(currentIndex - 1);
   }
 }
+
 function next() {
   if (images.length === 0) return;
   const hasClone = track.children.length > images.length;
   if (hasClone && currentIndex === images.length - 1) {
-    goToSlide(images.length); // 走克隆体
+    goToSlide(images.length);
   } else {
     goToSlide((currentIndex + 1) % images.length);
   }
@@ -698,39 +487,31 @@ function updateDots() {
   });
 }
 
-// ---- 进度条（图片用） ----
 function resetProgressBar() {
   progressBar.style.transition = 'none';
   progressBar.style.width = '0%';
-  progressBar.offsetHeight; // 强制回流
+  progressBar.offsetHeight;
   progressBar.style.transition = `width ${AUTO_INTERVAL}ms linear`;
   progressBar.style.width = '100%';
 }
 
-// ---- 自动播放 ----
 function startAutoPlay() {
   stopAutoPlay();
   const item = images[currentIndex];
-  if (!item || item.mediaType === 'video') return; // 视频不由定时器控制
-  if (images.length > 1) {
-    autoTimer = setInterval(next, AUTO_INTERVAL);
-  }
+  if (!item || item.mediaType === 'video') return;
+  if (images.length > 1) autoTimer = setInterval(next, AUTO_INTERVAL);
 }
 
 function stopAutoPlay() {
   if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
 }
 
-// ---- 全屏 ----
+// 全屏
 fullscreenBtn.addEventListener('click', () => {
-  if (document.fullscreenElement) {
-    document.exitFullscreen();
-  } else {
-    carousel.requestFullscreen().catch(() => {});
-  }
+  if (document.fullscreenElement) document.exitFullscreen();
+  else carousel.requestFullscreen().catch(() => {});
 });
 
-// 全屏状态变化后重新启动当前 slide 的播放/定时器
 document.addEventListener('fullscreenchange', () => {
   setTimeout(() => {
     if (images.length > 0) {
@@ -741,7 +522,7 @@ document.addEventListener('fullscreenchange', () => {
   }, 150);
 });
 
-// ---- 事件 ----
+// 箭头/键盘
 prevBtn.addEventListener('click', prev);
 nextBtn.addEventListener('click', next);
 
@@ -751,15 +532,11 @@ document.addEventListener('keydown', e => {
   if (e.key === 'ArrowRight') { e.preventDefault(); next(); }
 });
 
-// ---- 悬停暂停 ----
+// 悬停暂停
 carousel.addEventListener('mouseenter', () => {
   const item = images[currentIndex];
   if (item && item.mediaType === 'video') {
-    // 暂停视频
-    if (currentVideo) {
-      currentVideo.pause();
-    }
-    if (videoProgressTimer) { clearInterval(videoProgressTimer); videoProgressTimer = null; }
+    if (currentVideo) { currentVideo.pause(); if (videoProgressTimer) { clearInterval(videoProgressTimer); videoProgressTimer = null; } }
   } else {
     stopAutoPlay();
     const w = getComputedStyle(progressBar).width;
@@ -767,20 +544,16 @@ carousel.addEventListener('mouseenter', () => {
     progressBar.style.width = w;
   }
 });
-
 carousel.addEventListener('mouseleave', () => {
   const item = images[currentIndex];
   if (item && item.mediaType === 'video') {
-    // 恢复播放视频
     if (currentVideo) {
       currentVideo.play().catch(() => {});
-      // 恢复进度条更新
       if (videoProgressTimer) clearInterval(videoProgressTimer);
       videoProgressTimer = setInterval(() => {
         if (currentVideo && currentVideo.duration) {
-          const pct = (currentVideo.currentTime / currentVideo.duration) * 100;
           progressBar.style.transition = 'none';
-          progressBar.style.width = pct + '%';
+          progressBar.style.width = (currentVideo.currentTime / currentVideo.duration * 100) + '%';
         }
       }, 100);
     }
@@ -791,64 +564,29 @@ carousel.addEventListener('mouseleave', () => {
   }
 });
 
-// ---- 触屏 ----
+// 触屏
 let touchStartX = 0;
 carousel.addEventListener('touchstart', e => {
   if (images.length === 0) return;
   touchStartX = e.changedTouches[0].screenX;
-  // 暂停
   const item = images[currentIndex];
-  if (item && item.mediaType === 'video') {
-    if (currentVideo) currentVideo.pause();
-  } else {
-    stopAutoPlay();
-  }
+  if (item && item.mediaType === 'video') { if (currentVideo) currentVideo.pause(); }
+  else { stopAutoPlay(); }
 }, { passive: true });
-
 carousel.addEventListener('touchend', e => {
   if (images.length === 0) return;
   const diff = touchStartX - e.changedTouches[0].screenX;
-  if (Math.abs(diff) > 50) {
-    diff > 0 ? next() : prev();
-  } else {
-    // 没有滑动，恢复
+  if (Math.abs(diff) > 50) { diff > 0 ? next() : prev(); }
+  else {
     const item = images[currentIndex];
-    if (item && item.mediaType === 'video') {
-      if (currentVideo) currentVideo.play().catch(() => {});
-    } else {
-      startAutoPlay();
-    }
+    if (item && item.mediaType === 'video') { if (currentVideo) currentVideo.play().catch(() => {}); }
+    else { startAutoPlay(); }
   }
 });
-
 carousel.addEventListener('touchmove', e => { e.preventDefault(); }, { passive: false });
 
-// ============================================================
-//  轮询 IndexedDB
-// ============================================================
-let lastHash = '';
-
-function hashImages(list) {
-  return list.map(i => i.id + '|' + (i.url || '').substring(0, 80)).join(',');
-}
-
-async function poll() {
-  try {
-    const list = await loadImages();
-    const h = hashImages(list);
-    if (h !== lastHash) {
-      lastHash = h;
-      buildCarousel(list);
-    }
-  } catch (e) { /* ignore */ }
-}
-
-// ============================================================
-//  启动
-// ============================================================
+// 首次交互激活
 let firstInteractionHandled = false;
-
-// 页面首次用户交互后，确保轮播正常启动
 function onFirstInteraction() {
   if (firstInteractionHandled) return;
   firstInteractionHandled = true;
@@ -858,21 +596,19 @@ function onFirstInteraction() {
     afterSlideChange(images[currentIndex]);
   }
 }
-
-['click', 'touchstart', 'keydown'].forEach(evt => {
+['click','touchstart','keydown'].forEach(evt => {
   document.addEventListener(evt, onFirstInteraction, { once: true });
 });
 
-async function init() {
-  // 读取后台声音设置
-  soundEnabled = localStorage.getItem('carousel_sound_enabled') === 'true';
-  const list = await loadImages();
-  lastHash = hashImages(list);
+// ===== Firebase 实时同步 =====
+db.collection(COLLECTION).orderBy('createdAt').onSnapshot(snap => {
+  const list = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
   buildCarousel(list);
-  setInterval(poll, 2000);
-}
+}, () => {});
 
-init();
+// ===== 启动 =====
+soundEnabled = localStorage.getItem('carousel_sound_enabled') === 'true';
+loadImages().then(list => buildCarousel(list));
 </script>
 </body>
 </html>
