@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>媒体管理 - 后台</title>
+
+<!-- 腾讯云 CloudBase Web SDK -->
+<script src="https://static.cloudbase.net/cloudbase-js-sdk/1.7.2/cloudbase.full.js"></script>
+
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background: #0f0f1a; color: #e0e0e0; min-height: 100dvh; padding: 16px; overflow-y: auto; }
+  .page { max-width: 700px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; padding-bottom: 40px; }
+  .header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+  .header__back { color: #7eb8ff; text-decoration: none; font-size: 14px; display: flex; align-items: center; gap: 4px; transition: opacity 0.2s; }
+  .header__back:hover { opacity: 0.7; }
+  .header__title { font-size: 22px; font-weight: 700; letter-spacing: 0.5px; }
+  .header__count { font-size: 13px; color: rgba(255,255,255,0.45); background: rgba(255,255,255,0.06); padding: 4px 14px; border-radius: 14px; }
+  .card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 24px; }
+  .upload-zone { border: 2px dashed rgba(255,255,255,0.2); border-radius: 14px; padding: 32px 20px; text-align: center; cursor: pointer; transition: all 0.3s; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .upload-zone:hover, .upload-zone.drag-over { border-color: rgba(255,255,255,0.5); background: rgba(255,255,255,0.04); }
+  .upload-zone.drag-over { border-style: solid; box-shadow: 0 0 30px rgba(100,140,255,0.2); }
+  .upload-zone__icon { font-size: 40px; opacity: 0.6; pointer-events: none; }
+  .upload-zone__text { font-size: 15px; font-weight: 500; pointer-events: none; }
+  .upload-zone__hint { font-size: 12px; color: rgba(255,255,255,0.35); pointer-events: none; }
+  .sound-setting { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .sound-setting__label { font-size: 14px; font-weight: 500; color: rgba(255,255,255,0.7); }
+  .sound-setting__desc { font-size: 12px; color: rgba(255,255,255,0.35); margin-top: 2px; }
+  .toggle { position: relative; width: 48px; height: 28px; flex-shrink: 0; }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .toggle__slider { position: absolute; inset: 0; background: rgba(255,255,255,0.12); border-radius: 28px; cursor: pointer; transition: background 0.3s; }
+  .toggle__slider::before { content: ''; position: absolute; left: 3px; top: 3px; width: 22px; height: 22px; background: #fff; border-radius: 50%; transition: transform 0.3s; }
+  .toggle input:checked + .toggle__slider { background: #7eb8ff; }
+  .toggle input:checked + .toggle__slider::before { transform: translateX(20px); }
+  .global-drop-overlay { position: fixed; inset: 0; z-index: 9999; background: rgba(15,15,26,0.85); display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: 700; pointer-events: none; opacity: 0; transition: opacity 0.2s; }
+  .global-drop-overlay.active { opacity: 1; }
+  .divider { display: flex; align-items: center; gap: 12px; color: rgba(255,255,255,0.25); font-size: 12px; margin: 4px 0; }
+  .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: rgba(255,255,255,0.1); }
+  .url-section { display: flex; flex-direction: column; gap: 12px; }
+  .url-section__label { font-size: 14px; font-weight: 500; color: rgba(255,255,255,0.6); }
+  .url-section__textarea { width: 100%; min-height: 100px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.15); border-radius: 10px; color: #e0e0e0; padding: 12px 14px; font-size: 13px; font-family: inherit; resize: vertical; line-height: 1.6; transition: border-color 0.2s; }
+  .url-section__textarea:focus { outline: none; border-color: rgba(126,184,255,0.5); box-shadow: 0 0 0 3px rgba(126,184,255,0.08); }
+  .url-section__textarea::placeholder { color: rgba(255,255,255,0.2); }
+  .url-section__btn { align-self: flex-start; padding: 10px 24px; border-radius: 22px; border: 1px solid rgba(126,184,255,0.3); background: rgba(126,184,255,0.1); color: #7eb8ff; font-size: 14px; cursor: pointer; transition: all 0.25s; font-family: inherit; }
+  .url-section__btn:hover { background: rgba(126,184,255,0.2); border-color: rgba(126,184,255,0.6); }
+  .grid-title { font-size: 14px; font-weight: 500; color: rgba(255,255,255,0.5); }
+  .grid-empty { text-align: center; padding: 30px; color: rgba(255,255,255,0.25); font-size: 14px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
+  .grid__item { position: relative; aspect-ratio: 16/10; border-radius: 10px; overflow: hidden; background: #1a1a2e; border: 1px solid rgba(255,255,255,0.06); cursor: pointer; transition: transform 0.2s, border-color 0.2s; }
+  .grid__item:hover { transform: scale(1.03); border-color: rgba(255,255,255,0.2); }
+  .grid__item img, .grid__item video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .grid__item__delete { position: absolute; top: 6px; right: 6px; width: 24px; height: 24px; border-radius: 50%; border: none; background: rgba(255,60,60,0.75); color: #fff; font-size: 14px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.2s; z-index: 5; }
+  .grid__item:hover .grid__item__delete { opacity: 1; }
+  .grid__item__delete:hover { background: rgba(255,40,40,0.95); }
+  .grid__item__name { position: absolute; bottom: 0; left: 0; right: 0; padding: 6px 8px; background: linear-gradient(transparent, rgba(0,0,0,0.7)); font-size: 10px; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; pointer-events: none; }
+  .grid__item__badge { position: absolute; top: 6px; left: 6px; font-size: 9px; padding: 2px 6px; border-radius: 8px; background: rgba(0,0,0,0.5); color: rgba(255,255,255,0.6); pointer-events: none; }
+  .grid__item__video-icon { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); font-size: 30px; opacity: 0.6; pointer-events: none; text-shadow: 0 2px 6px rgba(0,0,0,0.6); }
+  .bottom-bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+  .btn { padding: 10px 20px; border-radius: 22px; border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.06); color: #e0e0e0; font-size: 14px; cursor: pointer; transition: all 0.25s; font-family: inherit; }
+  .btn:hover { background: rgba(255,255,255,0.12); }
+  .btn--danger { border-color: rgba(255,70,70,0.3); color: #ff6b6b; }
+  .btn--danger:hover { background: rgba(255,70,70,0.15); border-color: rgba(255,70,70,0.5); }
+  .toast-container { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 10000; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .toast { padding: 10px 22px; border-radius: 22px; background: rgba(30,30,50,0.95); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.12); color: #e0e0e0; font-size: 14px; animation: toastIn 0.35s ease, toastOut 0.35s ease 2s forwards; pointer-events: none; white-space: nowrap; }
+  .toast--warn { border-color: rgba(255,180,60,0.3); color: #ffb84d; }
+  @keyframes toastIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes toastOut { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-10px); } }
+  @media (max-width: 640px) {
+    body { padding: 10px; } .page { gap: 14px; } .card { padding: 16px; border-radius: 12px; }
+    .header__title { font-size: 18px; } .upload-zone { padding: 24px 14px; gap: 8px; }
+    .upload-zone__icon { font-size: 32px; } .upload-zone__text { font-size: 14px; }
+    .grid { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; }
+    .grid__item { aspect-ratio: 1/1; } .grid__item__delete { opacity: 1; width: 20px; height: 20px; font-size: 12px; }
+    .grid__item__video-icon { font-size: 22px; } .btn { padding: 8px 16px; font-size: 13px; }
+    .toast { font-size: 12px; padding: 8px 16px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="global-drop-overlay" id="globalDropOverlay">📷 释放以添加</div>
+<div class="toast-container" id="toastContainer"></div>
+<input type="file" id="fileInput" accept="image/*,video/*" multiple hidden>
+
+<div class="page">
+  <div class="header">
+    <a class="header__back" href="index.html">← 查看展示页</a>
+    <div class="header__title">📷 图片 / 视频管理</div>
+    <span class="header__count" id="headerCount">0 / 20</span>
+  </div>
+
+  <div class="card">
+    <div class="sound-setting">
+      <div>
+        <div class="sound-setting__label">ℹ️ 后台说明</div>
+        <div class="sound-setting__desc" id="loginStatus">连接云端数据库中…</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="upload-zone" id="uploadZone">
+      <div class="upload-zone__icon">📁</div>
+      <div class="upload-zone__text">点击或拖拽上传图片 / 视频</div>
+      <div class="upload-zone__hint">图片：JPG/PNG/GIF/WebP/BMP | 视频：MP4/WebM/MOV/AVI，最多 20 个</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="sound-setting">
+      <div>
+        <div class="sound-setting__label">🔊 视频默认声音</div>
+        <div class="sound-setting__desc">开启后展示页视频默认有声播放</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="soundToggle">
+        <span class="toggle__slider"></span>
+      </label>
+    </div>
+  </div>
+
+  <div class="divider">或从网址加载</div>
+
+  <div class="card">
+    <div class="url-section">
+      <div class="url-section__label">🌐 粘贴图片或视频链接（每行一个）</div>
+      <textarea class="url-section__textarea" id="urlTextarea"
+        placeholder="https://example.com/photo.jpg&#10;https://example.com/video.mp4&#10;https://example.com/photo2.png"></textarea>
+      <button class="url-section__btn" id="urlLoadBtn">加载</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="grid-title" id="gridTitle">已添加（0 个）</div>
+    <div class="grid-empty" id="gridEmpty">还没有内容，上传图片/视频或粘贴链接开始吧</div>
+    <div class="grid" id="grid"></div>
+  </div>
+
+  <div class="card">
+    <div class="sound-setting">
+      <div>
+        <div class="sound-setting__label">📦 从旧数据迁移</div>
+        <div class="sound-setting__desc">把旧 data.json 里的本地图片导入云存储（一次性，迁移后可删 data.json）</div>
+      </div>
+      <button class="btn" id="migrateBtn" type="button">导入旧数据</button>
+    </div>
+  </div>
+
+  <div class="bottom-bar">
+    <span style="font-size:13px;color:rgba(255,255,255,0.35)">上传后展示页实时同步（CloudBase 数据库）</span>
+    <button class="btn btn--danger" id="clearAllBtn">🗑 清空全部</button>
+  </div>
+</div>
+
+<script src="cloudbase-config.js"></script>
+<script>
+const MAX_ITEMS = 20;
+const VIDEO_EXTENSIONS = /\.(mp4|webm|mov|mkv|avi|flv|wmv|m4v|ogv|3gp)(\?.*)?$/i;
+
+// ===== CloudBase 初始化（容错：失败不阻断事件绑定）=====
+const COLLECTION = 'images';
+let db = null, storage = null, auth = null, _cbReady = false, _cbError = '';
+try {
+  db = app.database();
+  storage = app.storage();
+  auth = app.auth({ persistence: 'local' });
+  _cbReady = true;
+} catch (e) {
+  console.error('[CloudBase] 初始化失败:', e);
+  _cbError = (e && e.message) ? e.message : '初始化失败';
+}
+
+// 从数据库快照提取 item 列表（含 id）
+function snapToList(snap){ return (snap.docs||[]).map(d=>{ const data=d.data?d.data():d; return Object.assign({},data,{id:data._id||d.id}); }).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)); }
+
+// 把云存储 fileID 批量转 https 临时 URL（local 项缩略图需要）
+async function resolveUrls(items){
+  const need = items.filter(i=>i.source==='local' && i.fileID);
+  if(need.length===0) return items;
+  try{ const r=await storage.getTempFileURL({fileList:need.map(i=>i.fileID)}); const map={}; (r.fileList||[]).forEach(f=>{if(f.tempFileURL)map[f.fileID]=f.tempFileURL;}); return items.map(i=>map[i.fileID]?Object.assign({},i,{url:map[i.fileID]}):i); }
+  catch(e){ return items; }
+}
+
+// 数据库 CRUD
+async function loadAll(){
+  if(!_cbReady){ console.error('[CloudBase] 未初始化:', _cbError); return []; }
+  try{ const snap=await db.collection(COLLECTION).orderBy('createdAt','asc').get(); return snapToList(snap); }
+  catch(e){ console.error('[CloudBase] 读取失败:', e); return []; }
+}
+async function addToDB(entry){ return db.collection(COLLECTION).add(entry); }
+async function deleteFromDB(item){
+  if(item.fileID){ try{ await storage.deleteFile({fileList:[item.fileID]}); }catch(e){} }
+  return db.collection(COLLECTION).doc(item.id).remove();
+}
+async function clearAllDB(){
+  const items = await loadAll();
+  const fileIDs = items.filter(i=>i.fileID).map(i=>i.fileID);
+  if(fileIDs.length){ try{ await storage.deleteFile({fileList:fileIDs}); }catch(e){} }
+  for(const it of items){ try{ await db.collection(COLLECTION).doc(it.id).remove(); }catch(e){} }
+}
+
+// 登录守卫：未登录则提示并展开登录面板
+function requireLogin(){
+  if(!_cbReady){ showToast('CloudBase 未初始化：'+_cbError, true); return false; }
+  return true;
+}
+
+// DOM
+const uploadZone=document.getElementById('uploadZone'),fileInput=document.getElementById('fileInput'),
+  urlTextarea=document.getElementById('urlTextarea'),urlLoadBtn=document.getElementById('urlLoadBtn'),
+  grid=document.getElementById('grid'),gridTitle=document.getElementById('gridTitle'),
+  gridEmpty=document.getElementById('gridEmpty'),headerCount=document.getElementById('headerCount'),
+  clearAllBtn=document.getElementById('clearAllBtn'),toastContainer=document.getElementById('toastContainer'),
+  globalOverlay=document.getElementById('globalDropOverlay'),
+  serverListBtn=document.getElementById('serverListBtn'),
+  loginStatus=document.getElementById('loginStatus');
+
+function showToast(msg, warn = false) {
+  const el = document.createElement('div');
+  el.className = 'toast' + (warn ? ' toast--warn' : '');
+  el.textContent = msg;
+  toastContainer.appendChild(el);
+  el.addEventListener('animationend', e => { if (e.animationName === 'toastOut') el.remove(); });
+}
+
+// Local upload
+function handleLocalFiles(files) {
+  if(!requireLogin()) return;
+  const validFiles = Array.from(files).filter(f => f.type.startsWith('image/') || f.type.startsWith('video/'));
+  if (validFiles.length === 0) { showToast('未检测到图片或视频文件', true); return; }
+
+  loadAll().then(existing => {
+    const remaining = MAX_ITEMS - existing.length;
+    if (remaining <= 0) { showToast(`已达 ${MAX_ITEMS} 个上限，请先删除部分内容`, true); return; }
+    const toAdd = validFiles.slice(0, remaining);
+    if (validFiles.length > remaining) showToast(`仅添加前 ${remaining} 个（已达上限）`, true);
+
+    let loaded = 0, imgCount = 0, vidCount = 0;
+    toAdd.forEach(file => {
+      const isVideo = file.type.startsWith('video/');
+      if (isVideo) vidCount++; else imgCount++;
+      const cloudPath = 'carousel/' + Date.now() + '-' + file.name.replace(/[^\w.\-]+/g,'_');
+      storage.uploadFile({ cloudPath, filePath: file }).then(res => {
+        const fileID = res.fileID;
+        return addToDB({ url: fileID, fileID, name: file.name, mediaType: isVideo ? 'video' : 'image', source: 'local', createdAt: Date.now() });
+      }).then(() => {
+        loaded++;
+        if (loaded === toAdd.length) { refreshGrid(); let msg = `已添加 ${toAdd.length} 个`; if (imgCount && vidCount) msg += `（${imgCount} 图 + ${vidCount} 视频）`; else if (vidCount) msg += `视频`; else msg += `图片`; showToast(msg); }
+      }).catch(err => { showToast('上传失败：'+(err.message||err), true); });
+    });
+  });
+}
+
+// URL load
+async function handleUrls() {
+  if(!requireLogin()) return;
+  const raw = urlTextarea.value.trim();
+  if (!raw) { showToast('请粘贴链接', true); return; }
+  const lines = raw.split('\n').map(l => l.trim()).filter(l => l.length > 0 && /^https?:\/\/.+/.test(l));
+  if (lines.length === 0) { showToast('未检测到有效的 http/https 链接', true); return; }
+
+  const existing = await loadAll();
+  const remaining = MAX_ITEMS - existing.length;
+  if (remaining <= 0) { showToast(`已达 ${MAX_ITEMS} 个上限`, true); return; }
+  const urls = lines.slice(0, remaining);
+  if (lines.length > remaining) showToast(`仅添加前 ${remaining} 个链接`, true);
+
+  let added = 0, imgCount = 0, vidCount = 0;
+  for (const u of urls) {
+    let name = ''; try { name = new URL(u).pathname.split('/').pop() || u; } catch { name = u; }
+    const isVideo = VIDEO_EXTENSIONS.test(u);
+    if (isVideo) vidCount++; else imgCount++;
+    try { await addToDB({ url: u, name, mediaType: isVideo ? 'video' : 'image', source: 'remote', createdAt: Date.now() }); added++; } catch (e) { showToast(e.message || '添加失败', true); break; }
+  }
+  urlTextarea.value = '';
+  refreshGrid();
+  let msg = `已添加 ${added} 个`; if (imgCount && vidCount) msg += `（${imgCount} 图 + ${vidCount} 视频）`; else if (vidCount) msg += `视频`; else msg += `图片`;
+  showToast(msg);
+}
+
+// Grid
+async function refreshGrid() {
+  const raw = await loadAll();
+  const items = await resolveUrls(raw);
+  grid.innerHTML = '';
+  gridTitle.textContent = `已添加（${items.length} 个）`;
+  headerCount.textContent = `${items.length} / ${MAX_ITEMS}`;
+  if (items.length === 0) { gridEmpty.style.display = ''; return; }
+  gridEmpty.style.display = 'none';
+
+  items.forEach(item => {
+    const isVideo = item.mediaType === 'video';
+    const d = document.createElement('div');
+    d.className = 'grid__item';
+
+    if (isVideo) {
+      const v = document.createElement('video');
+      v.src = item.url; v.muted = true; v.playsInline = true; v.preload = 'metadata';
+      v.setAttribute('playsinline', ''); v.style.width='100%'; v.style.height='100%'; v.style.objectFit='cover';
+      v.addEventListener('loadeddata', () => { v.currentTime = 0.5; }, { once: true });
+      d.appendChild(v);
+      const pi = document.createElement('div'); pi.className='grid__item__video-icon'; pi.textContent='▶'; d.appendChild(pi);
+    } else {
+      const im = document.createElement('img'); im.src=item.url; im.alt=item.name; im.loading='lazy'; d.appendChild(im);
+    }
+
+    const b = document.createElement('div'); b.className='grid__item__badge';
+    b.textContent = isVideo ? '🎬 视频' : (item.source === 'local' ? '📷 本地' : '🌐 远程');
+    d.appendChild(b);
+
+    const n = document.createElement('div'); n.className='grid__item__name';
+    n.textContent = (isVideo ? '🎬 ' : '') + (item.name || '未知');
+    d.appendChild(n);
+
+    const del = document.createElement('button'); del.className='grid__item__delete';
+    del.innerHTML='×'; del.title='删除';
+    del.addEventListener('click', e => { e.stopPropagation(); if(!requireLogin()) return; deleteFromDB(item).then(() => { refreshGrid(); showToast('已删除'); }).catch(err => showToast(err.message || '删除失败', true)); });
+    d.appendChild(del);
+
+    d.addEventListener('click', () => { window.open(item.url, '_blank'); });
+    grid.appendChild(d);
+  });
+}
+
+// Events
+uploadZone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => { if (fileInput.files.length > 0) { handleLocalFiles(fileInput.files); fileInput.value = ''; } });
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag-over'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'));
+uploadZone.addEventListener('drop', e => { e.preventDefault(); uploadZone.classList.remove('drag-over'); if (e.dataTransfer.files.length > 0) handleLocalFiles(e.dataTransfer.files); });
+
+let dragCounter = 0;
+document.addEventListener('dragenter', e => { e.preventDefault(); dragCounter++; if (dragCounter === 1) globalOverlay.classList.add('active'); });
+document.addEventListener('dragleave', e => { e.preventDefault(); dragCounter--; if (dragCounter === 0) globalOverlay.classList.remove('active'); });
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => { e.preventDefault(); dragCounter = 0; globalOverlay.classList.remove('active'); if (e.dataTransfer.files.length > 0) handleLocalFiles(e.dataTransfer.files); });
+
+urlLoadBtn.addEventListener('click', handleUrls);
+
+const soundToggle = document.getElementById('soundToggle');
+soundToggle.checked = localStorage.getItem('carousel_sound_enabled') === 'true';
+soundToggle.addEventListener('change', () => { localStorage.setItem('carousel_sound_enabled', soundToggle.checked ? 'true' : 'false'); showToast(soundToggle.checked ? '已开启视频声音' : '已关闭视频声音（静音）'); });
+
+// ===== 连接状态显示（无需登录，匿名即可上传/删除）=====
+function updateLoginStatus(){
+  if(!_cbReady){ if(loginStatus) loginStatus.textContent = '⚠️ CloudBase 未初始化：'+_cbError; return; }
+  if(loginStatus) loginStatus.textContent = '✅ 已连接云端，可直接上传/删除';
+}
+
+clearAllBtn.addEventListener('click', () => { if(!requireLogin()) return; if (!confirm('确定要清空全部内容吗？')) return; clearAllDB().then(() => { refreshGrid(); showToast('已清空全部'); }).catch(err => showToast(err.message || '清空失败', true)); });
+
+// 迁移：把旧 data.json 的本地 base64 图片导入云存储
+const migrateBtn=document.getElementById('migrateBtn');
+migrateBtn.addEventListener('click', async () => {
+  if(!requireLogin()) return;
+  if(!confirm('从旧 data.json 导入历史本地图片到云存储？')) return;
+  migrateBtn.disabled=true; migrateBtn.textContent='导入中…';
+  try{
+    const r=await fetch('data.json',{cache:'no-store'});
+    if(!r.ok){ showToast('未找到 data.json（可能已迁移）', true); return; }
+    const data=await r.json();
+    const items=(data.items||[]).filter(i=>i.source==='local'&&i.url&&i.url.startsWith('data:'));
+    if(items.length===0){ showToast('无需导入的本地图片'); return; }
+    let done=0;
+    for(const it of items){
+      const blob=await (await fetch(it.url)).blob();
+      const file=new File([blob], it.name, {type:blob.type||'image/png'});
+      const cloudPath='carousel/migrated-'+it.createdAt+'-'+it.name.replace(/[^\w.\-]+/g,'_');
+      const res=await storage.uploadFile({cloudPath, filePath:file});
+      await addToDB({url:res.fileID, fileID:res.fileID, name:it.name, mediaType:it.mediaType, source:'local', createdAt:it.createdAt});
+      done++;
+    }
+    showToast('已导入 '+done+' 个'); refreshGrid();
+  }catch(e){ showToast('导入失败：'+(e.message||e), true); }
+  finally{ migrateBtn.disabled=false; migrateBtn.textContent='导入旧数据'; }
+});
+
+// 启动：匿名登录后加载列表（容错，CB 未就绪也不阻塞）
+(async () => {
+  try {
+    if(_cbReady){ await auth.signInAnonymously(); }
+    updateLoginStatus();
+    refreshGrid();
+  } catch(e){ console.error('[启动]', e); updateLoginStatus(); }
+})();
+</script>
+</body>
+</html>
