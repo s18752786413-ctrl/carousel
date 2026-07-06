@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>图片视频轮播展示</title>
 
+<!-- 腾讯云 CloudBase Web SDK -->
+<script src="https://static.cloudbase.net/cloudbase-js-sdk/1.7.2/cloudbase.full.js"></script>
+
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -171,24 +174,14 @@
   <a class="admin-link" href="admin.html">📷 管理图片/视频</a>
 </div>
 
+<script src="cloudbase-config.js"></script>
 <script>
-// ===== 数据读取：从同源 data.json 读取（与展示页同站托管，手机可直连）=====
-const DATA_URL = 'data.json';
+// ===== CloudBase 初始化（展示页匿名登录，只读）=====
+const db = app.database();
+const storage = app.storage();
+const COLLECTION = 'images';
 
-async function loadImages() {
-  try {
-    const res = await fetch(DATA_URL, { cache: 'no-store' });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    return (data.items || []).slice().sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
-  } catch (e) {
-    console.error('[data.json] 读取失败:', e);
-    showCloudError(e);
-    return null;
-  }
-}
-
-// 在空状态区显示数据读取错误
+// 在空状态区显示云端连接错误
 function showCloudError(e) {
   const icon = document.getElementById('emptyStateIcon');
   const text = document.getElementById('emptyStateText');
@@ -197,6 +190,27 @@ function showCloudError(e) {
   if (text) text.textContent = '数据加载失败：' + msg + '\n请刷新页面重试';
   emptyState.style.display = '';
   carouselContainer.classList.remove('visible');
+}
+
+// 把云存储 fileID 批量转成可显示的 https 临时 URL（local 项）
+async function resolveUrls(items) {
+  const need = items.filter(i => i.source === 'local' && i.fileID);
+  if (need.length === 0) return items;
+  try {
+    const r = await storage.getTempFileURL({ fileList: need.map(i => i.fileID) });
+    const map = {};
+    (r.fileList || []).forEach(f => { if (f.tempFileURL) map[f.fileID] = f.tempFileURL; });
+    return items.map(i => map[i.fileID] ? Object.assign({}, i, { url: map[i.fileID] }) : i);
+  } catch (e) { return items; }
+}
+
+// 从数据库快照提取 item 列表（含 id，按 createdAt 升序）
+function snapToList(snap) {
+  return (snap.docs || []).map(d => {
+    const data = d.data ? d.data() : d;
+    const id = data._id || d.id;
+    return Object.assign({}, data, { id });
+  }).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
 }
 
 // ===== 轮播逻辑 =====
@@ -616,16 +630,27 @@ function onFirstInteraction() {
   document.addEventListener(evt, onFirstInteraction, { once: true });
 });
 
-// ===== 轮询 data.json，检测管理页新上传的内容（每 10 秒）=====
-async function refreshData() {
-  const list = await loadImages();
-  if (list && JSON.stringify(list) !== JSON.stringify(images)) buildCarousel(list);
+// ===== CloudBase 实时监听（数据库变更立即同步）=====
+async function renderFromSnap(snap) {
+  const list = await resolveUrls(snapToList(snap));
+  buildCarousel(list);
 }
-setInterval(refreshData, 10000);
 
-// ===== 启动 =====
+// ===== 启动：匿名登录后开启实时监听 =====
 soundEnabled = localStorage.getItem('carousel_sound_enabled') === 'true';
-(async () => { const list = await loadImages(); if (list) buildCarousel(list); })();
+(async () => {
+  try {
+    const auth = app.auth({ persistence: 'local' });
+    await auth.signInAnonymously();
+    db.collection(COLLECTION).orderBy('createdAt', 'asc').watch({
+      onChange: renderFromSnap,
+      onError: err => { console.error('[CloudBase] watch 失败:', err); showCloudError(err); }
+    });
+  } catch (e) {
+    console.error('[CloudBase] 初始化失败:', e);
+    showCloudError(e);
+  }
+})();
 </script>
 </body>
 </html>
