@@ -177,8 +177,8 @@
 <script src="cloudbase-config.js"></script>
 <script>
 // ===== CloudBase 初始化（展示页匿名登录，只读）=====
+// 注：1.7.2 SDK 中 storage 方法直接挂在 app 上（app.uploadFile/app.deleteFile/app.getTempFileURL）
 const db = app.database();
-const storage = app.storage();
 const COLLECTION = 'images';
 
 // 在空状态区显示云端连接错误
@@ -197,7 +197,7 @@ async function resolveUrls(items) {
   const need = items.filter(i => i.source === 'local' && i.fileID);
   if (need.length === 0) return items;
   try {
-    const r = await storage.getTempFileURL({ fileList: need.map(i => i.fileID) });
+    const r = await app.getTempFileURL({ fileList: need.map(i => i.fileID) });
     const map = {};
     (r.fileList || []).forEach(f => { if (f.tempFileURL) map[f.fileID] = f.tempFileURL; });
     return items.map(i => map[i.fileID] ? Object.assign({}, i, { url: map[i.fileID] }) : i);

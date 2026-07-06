@@ -160,10 +160,9 @@ const VIDEO_EXTENSIONS = /\.(mp4|webm|mov|mkv|avi|flv|wmv|m4v|ogv|3gp)(\?.*)?$/i
 
 // ===== CloudBase 初始化（容错：失败不阻断事件绑定）=====
 const COLLECTION = 'images';
-let db = null, storage = null, auth = null, _cbReady = false, _cbError = '';
+let db = null, auth = null, _cbReady = false, _cbError = '';
 try {
   db = app.database();
-  storage = app.storage();
   auth = app.auth({ persistence: 'local' });
   _cbReady = true;
 } catch (e) {
@@ -178,7 +177,7 @@ function snapToList(snap){ return (snap.docs||[]).map(d=>{ const data=d.data?d.d
 async function resolveUrls(items){
   const need = items.filter(i=>i.source==='local' && i.fileID);
   if(need.length===0) return items;
-  try{ const r=await storage.getTempFileURL({fileList:need.map(i=>i.fileID)}); const map={}; (r.fileList||[]).forEach(f=>{if(f.tempFileURL)map[f.fileID]=f.tempFileURL;}); return items.map(i=>map[i.fileID]?Object.assign({},i,{url:map[i.fileID]}):i); }
+  try{ const r=await app.getTempFileURL({fileList:need.map(i=>i.fileID)}); const map={}; (r.fileList||[]).forEach(f=>{if(f.tempFileURL)map[f.fileID]=f.tempFileURL;}); return items.map(i=>map[i.fileID]?Object.assign({},i,{url:map[i.fileID]}):i); }
   catch(e){ return items; }
 }
 
@@ -190,13 +189,13 @@ async function loadAll(){
 }
 async function addToDB(entry){ return db.collection(COLLECTION).add(entry); }
 async function deleteFromDB(item){
-  if(item.fileID){ try{ await storage.deleteFile({fileList:[item.fileID]}); }catch(e){} }
+  if(item.fileID){ try{ await app.deleteFile({fileList:[item.fileID]}); }catch(e){} }
   return db.collection(COLLECTION).doc(item.id).remove();
 }
 async function clearAllDB(){
   const items = await loadAll();
   const fileIDs = items.filter(i=>i.fileID).map(i=>i.fileID);
-  if(fileIDs.length){ try{ await storage.deleteFile({fileList:fileIDs}); }catch(e){} }
+  if(fileIDs.length){ try{ await app.deleteFile({fileList:fileIDs}); }catch(e){} }
   for(const it of items){ try{ await db.collection(COLLECTION).doc(it.id).remove(); }catch(e){} }
 }
 
@@ -241,7 +240,7 @@ function handleLocalFiles(files) {
       const isVideo = file.type.startsWith('video/');
       if (isVideo) vidCount++; else imgCount++;
       const cloudPath = 'carousel/' + Date.now() + '-' + file.name.replace(/[^\w.\-]+/g,'_');
-      storage.uploadFile({ cloudPath, filePath: file }).then(res => {
+      app.uploadFile({ cloudPath, filePath: file }).then(res => {
         const fileID = res.fileID;
         return addToDB({ url: fileID, fileID, name: file.name, mediaType: isVideo ? 'video' : 'image', source: 'local', createdAt: Date.now() });
       }).then(() => {
@@ -367,7 +366,7 @@ migrateBtn.addEventListener('click', async () => {
       const blob=await (await fetch(it.url)).blob();
       const file=new File([blob], it.name, {type:blob.type||'image/png'});
       const cloudPath='carousel/migrated-'+it.createdAt+'-'+it.name.replace(/[^\w.\-]+/g,'_');
-      const res=await storage.uploadFile({cloudPath, filePath:file});
+      const res=await app.uploadFile({cloudPath, filePath:file});
       await addToDB({url:res.fileID, fileID:res.fileID, name:it.name, mediaType:it.mediaType, source:'local', createdAt:it.createdAt});
       done++;
     }
