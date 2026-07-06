@@ -90,18 +90,12 @@
     <span class="header__count" id="headerCount">0 / 20</span>
   </div>
 
-  <div class="card" id="loginCard">
+  <div class="card">
     <div class="sound-setting">
       <div>
-        <div class="sound-setting__label">🔐 管理员登录</div>
-        <div class="sound-setting__desc" id="loginStatus">未登录</div>
+        <div class="sound-setting__label">ℹ️ 后台说明</div>
+        <div class="sound-setting__desc" id="loginStatus">连接云端数据库中…</div>
       </div>
-      <button class="btn" id="loginToggleBtn" type="button">登录</button>
-    </div>
-    <div id="loginPanel" style="display:none; margin-top:14px; flex-direction:column; gap:10px;">
-      <input type="text" id="loginUser" placeholder="用户名" autocomplete="username" style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.15); border-radius:10px; color:#e0e0e0; padding:10px 12px; font-size:14px; font-family:inherit;">
-      <input type="password" id="loginPass" placeholder="密码" autocomplete="current-password" style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.15); border-radius:10px; color:#e0e0e0; padding:10px 12px; font-size:14px; font-family:inherit;">
-      <button class="btn" id="loginSubmitBtn" type="button">登录</button>
     </div>
   </div>
 
@@ -164,11 +158,18 @@
 const MAX_ITEMS = 20;
 const VIDEO_EXTENSIONS = /\.(mp4|webm|mov|mkv|avi|flv|wmv|m4v|ogv|3gp)(\?.*)?$/i;
 
-// ===== CloudBase 初始化 =====
-const db = app.database();
-const storage = app.storage();
-const auth = app.auth({ persistence: 'local' });
+// ===== CloudBase 初始化（容错：失败不阻断事件绑定）=====
 const COLLECTION = 'images';
+let db = null, storage = null, auth = null, _cbReady = false, _cbError = '';
+try {
+  db = app.database();
+  storage = app.storage();
+  auth = app.auth({ persistence: 'local' });
+  _cbReady = true;
+} catch (e) {
+  console.error('[CloudBase] 初始化失败:', e);
+  _cbError = (e && e.message) ? e.message : '初始化失败';
+}
 
 // 从数据库快照提取 item 列表（含 id）
 function snapToList(snap){ return (snap.docs||[]).map(d=>{ const data=d.data?d.data():d; return Object.assign({},data,{id:data._id||d.id}); }).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)); }
@@ -183,6 +184,7 @@ async function resolveUrls(items){
 
 // 数据库 CRUD
 async function loadAll(){
+  if(!_cbReady){ console.error('[CloudBase] 未初始化:', _cbError); return []; }
   try{ const snap=await db.collection(COLLECTION).orderBy('createdAt','asc').get(); return snapToList(snap); }
   catch(e){ console.error('[CloudBase] 读取失败:', e); return []; }
 }
@@ -200,7 +202,7 @@ async function clearAllDB(){
 
 // 登录守卫：未登录则提示并展开登录面板
 function requireLogin(){
-  if(!auth.currentUser){ showToast('请先登录', true); showLoginPanel(); return false; }
+  if(!_cbReady){ showToast('CloudBase 未初始化：'+_cbError, true); return false; }
   return true;
 }
 
@@ -211,9 +213,8 @@ const uploadZone=document.getElementById('uploadZone'),fileInput=document.getEle
   gridEmpty=document.getElementById('gridEmpty'),headerCount=document.getElementById('headerCount'),
   clearAllBtn=document.getElementById('clearAllBtn'),toastContainer=document.getElementById('toastContainer'),
   globalOverlay=document.getElementById('globalDropOverlay'),
-  loginToggleBtn=document.getElementById('loginToggleBtn'),loginPanel=document.getElementById('loginPanel'),
-  loginUser=document.getElementById('loginUser'),loginPass=document.getElementById('loginPass'),
-  loginSubmitBtn=document.getElementById('loginSubmitBtn'),loginStatus=document.getElementById('loginStatus');
+  serverListBtn=document.getElementById('serverListBtn'),
+  loginStatus=document.getElementById('loginStatus');
 
 function showToast(msg, warn = false) {
   const el = document.createElement('div');
@@ -341,28 +342,11 @@ const soundToggle = document.getElementById('soundToggle');
 soundToggle.checked = localStorage.getItem('carousel_sound_enabled') === 'true';
 soundToggle.addEventListener('change', () => { localStorage.setItem('carousel_sound_enabled', soundToggle.checked ? 'true' : 'false'); showToast(soundToggle.checked ? '已开启视频声音' : '已关闭视频声音（静音）'); });
 
-// ===== 登录管理 =====
-function showLoginPanel(){ loginPanel.style.display='flex'; loginUser.focus(); }
-function setManageVisible(v){ document.querySelectorAll('.page > *:not(#loginCard):not(.header)').forEach(el => el.style.display = v ? '' : 'none'); }
+// ===== 连接状态显示（无需登录，匿名即可上传/删除）=====
 function updateLoginStatus(){
-  const u = auth.currentUser;
-  if(u){ loginStatus.textContent = '✅ 已登录：' + (u.username || u.uid); loginToggleBtn.textContent = '退出'; loginPanel.style.display='none'; setManageVisible(true); }
-  else { loginStatus.textContent = '❌ 未登录（请先登录）'; loginToggleBtn.textContent = '登录'; setManageVisible(false); }
+  if(!_cbReady){ if(loginStatus) loginStatus.textContent = '⚠️ CloudBase 未初始化：'+_cbError; return; }
+  if(loginStatus) loginStatus.textContent = '✅ 已连接云端，可直接上传/删除';
 }
-async function doLogin(){
-  const u = loginUser.value.trim(), p = loginPass.value;
-  if(!u || !p){ showToast('请输入用户名和密码', true); return; }
-  loginSubmitBtn.disabled = true; loginSubmitBtn.textContent = '登录中…';
-  try{
-    await auth.signInWithUsernameAndPassword(u, p);
-    showToast('登录成功'); loginUser.value=''; loginPass.value='';
-    updateLoginStatus(); refreshGrid();
-  }catch(e){ showToast('登录失败：'+(e.message||e), true); }
-  finally{ loginSubmitBtn.disabled=false; loginSubmitBtn.textContent='登录'; }
-}
-loginToggleBtn.addEventListener('click', () => { if(auth.currentUser){ auth.signOut().then(()=>{ updateLoginStatus(); showToast('已退出'); }); } else { showLoginPanel(); } });
-loginSubmitBtn.addEventListener('click', doLogin);
-loginPass.addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
 
 clearAllBtn.addEventListener('click', () => { if(!requireLogin()) return; if (!confirm('确定要清空全部内容吗？')) return; clearAllDB().then(() => { refreshGrid(); showToast('已清空全部'); }).catch(err => showToast(err.message || '清空失败', true)); });
 
@@ -392,9 +376,14 @@ migrateBtn.addEventListener('click', async () => {
   finally{ migrateBtn.disabled=false; migrateBtn.textContent='导入旧数据'; }
 });
 
-// 启动：检查登录态
-updateLoginStatus();
-if(auth.currentUser) refreshGrid();
+// 启动：匿名登录后加载列表（容错，CB 未就绪也不阻塞）
+(async () => {
+  try {
+    if(_cbReady){ await auth.signInAnonymously(); }
+    updateLoginStatus();
+    refreshGrid();
+  } catch(e){ console.error('[启动]', e); updateLoginStatus(); }
+})();
 </script>
 </body>
 </html>
