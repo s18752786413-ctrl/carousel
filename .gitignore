@@ -7,3 +7,5 @@ node_modules/
 .vscode/
 .idea/
 *.log
+cb_sdk.js
+node_modules/
