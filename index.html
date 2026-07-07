@@ -175,18 +175,31 @@
 // ===== 数据读取：从同源 data.json 读取（与展示页同站托管，手机可直连）=====
 const DATA_URL = 'data.json';
 
-async function loadImages() {
+// 带超时的 fetch（避免请求挂死拖垮页面）
+function fetchWithTimeout(url, opts, ms) {
+  return Promise.race([
+    fetch(url, opts),
+    new Promise((_, rej) => setTimeout(() => rej(new Error('请求超时')), ms))
+  ]);
+}
+
+// 读取图片列表。showError=true 时才显示错误（首次加载用）；轮询用 false 静默
+async function loadImages(showError) {
   try {
-    const res = await fetch(DATA_URL, { cache: 'no-store' });
+    const res = await fetchWithTimeout(DATA_URL, { cache: 'no-store' }, 12000);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
+    _pollFail = 0; // 成功一次就清零失败计数
     return (data.items || []).slice().sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
   } catch (e) {
     console.error('[data.json] 读取失败:', e);
-    showCloudError(e);
+    if (showError) showCloudError(e);
     return null;
   }
 }
+
+// 轮询失败计数（连续多次失败才提示，单次网络抖动不打扰）
+let _pollFail = 0;
 
 // 在空状态区显示数据读取错误
 function showCloudError(e) {
@@ -609,16 +622,23 @@ function onFirstInteraction() {
   document.addEventListener(evt, onFirstInteraction, { once: true });
 });
 
-// ===== 轮询 data.json，检测管理页新上传的内容（每 10 秒）=====
+// ===== 轮询 data.json，检测管理页新上传的内容（每 15 秒）=====
+// 轮询失败时静默忽略，保持已有轮播继续展示；连续 5 次失败才在控制台警告
 async function refreshData() {
-  const list = await loadImages();
-  if (list && JSON.stringify(list) !== JSON.stringify(images)) buildCarousel(list);
+  const list = await loadImages(false);
+  if (list) {
+    if (JSON.stringify(list) !== JSON.stringify(images)) buildCarousel(list);
+  } else {
+    _pollFail++;
+    console.warn('[轮询] 第 ' + _pollFail + ' 次失败，保留当前展示不动');
+    if (_pollFail >= 5) console.error('[轮询] 连续多次失败，可能是网络问题，但页面仍保持上次内容');
+  }
 }
-setInterval(refreshData, 10000);
+setInterval(refreshData, 15000);
 
-// ===== 启动 =====
+// ===== 启动（首次加载失败才显示错误提示）=====
 soundEnabled = localStorage.getItem('carousel_sound_enabled') === 'true';
-(async () => { const list = await loadImages(); if (list) buildCarousel(list); })();
+(async () => { const list = await loadImages(true); if (list) buildCarousel(list); })();
 </script>
 </body>
 </html>
